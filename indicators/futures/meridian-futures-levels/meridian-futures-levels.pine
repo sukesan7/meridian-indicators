@@ -1,0 +1,1391 @@
+//@version=6
+indicator(
+     title = "Meridian — Futures Levels",
+     shorttitle = "Meridian Futures Levels",
+     overlay = true,
+     format = format.price,
+     max_bars_back = 5000,
+     max_lines_count = 220,
+     max_labels_count = 220,
+     max_boxes_count = 40,
+     explicit_plot_zorder = true
+ )
+
+// ============================================================================
+// Meridian — Futures Levels
+// Pine Script® v6
+//
+// Purpose
+//   • Clean futures-session structure for NQ / ES and related index futures.
+//   • Opening Range, Initial Balance, custom session VWAP + deviations.
+//   • Confirmed previous-day / previous-week references.
+//   • Configurable Fibonacci retracements and range projections.
+//   • Current confluence clustering across independent level families.
+//   • Confirmed acceptance / rejection state events with dynamic alerts.
+//
+// Design notes
+//   • Previous daily/weekly values are confirmed HTF requests.
+//   • Drawings are reused or bounded to avoid object leakage.
+//   • OR/IB precision depends on chart bars aligning with session boundaries.
+// ============================================================================
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Input groups
+// ─────────────────────────────────────────────────────────────────────────────
+const string G_GENERAL  = "01 — General"
+const string G_SESSIONS = "02 — Sessions"
+const string G_OR       = "03 — Opening Range"
+const string G_MARKERS  = "03A — Vertical Time Markers"
+const string G_IB       = "04 — Initial Balance"
+const string G_VWAP     = "05 — VWAP + Custom Deviation"
+const string G_REFS     = "06 — Previous Day / Week"
+const string G_FIB      = "07 — Fibonacci + Range Projections"
+const string G_CLUSTER  = "08 — Level Clustering"
+const string G_STATE    = "09 — Acceptance / Rejection"
+const string G_THEME    = "10 — Meridian Theme"
+const string G_HUD      = "11 — HUD + Alerts"
+
+// ─────────────────────────────────────────────────────────────────────────────
+// General
+// ─────────────────────────────────────────────────────────────────────────────
+bool   indicatorEnabled = input.bool(true, "Enable indicator", group = G_GENERAL)
+string sessionTimezone  = input.string("America/New_York", "Session time zone", group = G_GENERAL,
+     tooltip = "Use an IANA time zone. America/New_York is recommended for CME index-futures session definitions.")
+int    rightExtension   = input.int(18, "Right-side line extension (bars)", minval = 2, maxval = 300, group = G_GENERAL)
+bool   showPriceInTags  = input.bool(true, "Show prices in horizontal labels", group = G_GENERAL)
+bool   showLiveLevelTags = input.bool(true, "Show horizontal line labels", group = G_GENERAL)
+string horizontalLabelMode = input.string("Compact", "Horizontal-label wording", options = ["Compact", "Descriptive"], group = G_GENERAL)
+bool   showPriceScaleValues = input.bool(false, "Show plotted values on price scale", group = G_GENERAL,
+     tooltip = "Off by default to keep the right-side price scale clean.")
+int    horizontalLabelOffsetBars = input.int(1, "Horizontal-label offset (bars)", minval = 0, maxval = 20, group = G_GENERAL)
+float  horizontalLabelOffsetTicks = input.float(3.0, "Horizontal-label height (ticks)", minval = 0.0, maxval = 40.0, step = 0.25, group = G_GENERAL)
+string horizontalLabelTextSize = input.string("Small", "Horizontal-label text size", options = ["Tiny", "Small", "Normal"], group = G_GENERAL)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sessions
+// ─────────────────────────────────────────────────────────────────────────────
+string futuresSession   = input.session("1800-1700:1234567", "Full futures session", group = G_SESSIONS)
+string overnightSession = input.session("1800-0930:1234567", "Overnight session", group = G_SESSIONS)
+string rthSession       = input.session("0930-1600:23456", "RTH session", group = G_SESSIONS)
+int    rthOpenHour      = input.int(9, "RTH open (hour)", minval = 0, maxval = 23, inline = "rthopen", group = G_SESSIONS)
+int    rthOpenMinute    = input.int(30, "Minute", minval = 0, maxval = 59, inline = "rthopen", group = G_SESSIONS)
+
+bool showSessionShading = input.bool(false, "Shade sessions", group = G_SESSIONS)
+bool showSessionOpens   = input.bool(true, "Show futures / RTH opens", group = G_SESSIONS)
+bool showOvernight      = input.bool(true, "Show overnight high / low", group = G_SESSIONS)
+bool showOvernightMid   = input.bool(false, "Show overnight midpoint", group = G_SESSIONS)
+int  sessionLineWidth   = input.int(1, "Session level width", minval = 1, maxval = 4, group = G_SESSIONS)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Opening Range
+// ─────────────────────────────────────────────────────────────────────────────
+bool showOR             = input.bool(true, "Show Opening Range", group = G_OR)
+string openingRangeDuration = input.string("15 Minutes", "Opening Range duration", options = ["1 Minute", "5 Minutes", "15 Minutes", "30 Minutes"], group = G_OR)
+bool showORDeveloping   = input.bool(true, "Show while developing", group = G_OR)
+bool showORMid          = input.bool(true, "Show midpoint", group = G_OR)
+bool fillOR             = input.bool(true, "Fill range", group = G_OR)
+int  orLineWidth        = input.int(2, "Line width", minval = 1, maxval = 4, group = G_OR)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Vertical time markers
+// ─────────────────────────────────────────────────────────────────────────────
+bool showTimeMarkers     = input.bool(true, "Show vertical time markers", group = G_MARKERS)
+bool showTimeMarkerLabels = input.bool(true, "Show time-marker labels", group = G_MARKERS)
+string timeMarkerLabelLayout = input.string("Stacked", "Marker-label layout", options = ["Single line", "Stacked"], group = G_MARKERS)
+string timeMarkerTextSize = input.string("Small", "Marker-label text size", options = ["Tiny", "Small", "Normal"], group = G_MARKERS)
+float timeMarkerTopPaddingAtr = input.float(0.75, "Marker-label top padding (ATR)", minval = 0.0, maxval = 5.0, step = 0.05, group = G_MARKERS,
+     tooltip = "Places marker text above the current New York calendar-day high. Increase if labels still overlap candles.")
+int  maxTimeMarkerEvents = input.int(48, "Maximum marker events", minval = 8, maxval = 160, group = G_MARKERS)
+color timeMarkerColor    = input.color(color.rgb(244, 114, 182), "Marker color", group = G_MARKERS)
+int  timeMarkerTransparency = input.int(82, "Marker transparency", minval = 65, maxval = 96, group = G_MARKERS)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Initial Balance
+// ─────────────────────────────────────────────────────────────────────────────
+bool showIB             = input.bool(true, "Show Initial Balance", group = G_IB)
+int  initialBalanceMinutes = input.int(60, "Initial Balance duration (minutes)", minval = 1, maxval = 240, group = G_IB)
+bool showIBDeveloping   = input.bool(false, "Show while developing", group = G_IB)
+bool showIBMid          = input.bool(true, "Show midpoint", group = G_IB)
+bool fillIB             = input.bool(false, "Fill range", group = G_IB)
+int  ibLineWidth        = input.int(2, "Line width", minval = 1, maxval = 4, group = G_IB)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// VWAP
+// ─────────────────────────────────────────────────────────────────────────────
+bool   showVWAP         = input.bool(true, "Show VWAP", group = G_VWAP)
+string vwapAnchor       = input.string("RTH", "Anchor", options = ["RTH", "Full Futures Session", "Week"], group = G_VWAP)
+float  vwapSource       = input.source(hlc3, "Source", group = G_VWAP)
+string deviationMethod = input.string("Volume-weighted", "Deviation method",
+     options = ["Volume-weighted", "Unweighted"], group = G_VWAP,
+     tooltip = "Volume-weighted uses cumulative volume-weighted squared distance. Unweighted treats each chart bar equally.")
+bool carryVWAP          = input.bool(false, "Carry VWAP outside anchor session", group = G_VWAP)
+
+bool  showBand1         = input.bool(true, "+/− Band 1", inline = "b1", group = G_VWAP)
+float bandMult1         = input.float(1.0, "Multiplier", minval = 0.1, step = 0.1, inline = "b1", group = G_VWAP)
+bool  showBand2         = input.bool(true, "+/− Band 2", inline = "b2", group = G_VWAP)
+float bandMult2         = input.float(2.0, "Multiplier", minval = 0.1, step = 0.1, inline = "b2", group = G_VWAP)
+bool  showBand3         = input.bool(false, "+/− Band 3", inline = "b3", group = G_VWAP)
+float bandMult3         = input.float(3.0, "Multiplier", minval = 0.1, step = 0.1, inline = "b3", group = G_VWAP)
+int   vwapLineWidth     = input.int(2, "VWAP line width", minval = 1, maxval = 4, group = G_VWAP)
+int   bandLineWidth     = input.int(1, "Band line width", minval = 1, maxval = 3, group = G_VWAP)
+int   bandFillOpacity   = input.int(92, "Band fill transparency", minval = 70, maxval = 100, group = G_VWAP)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Previous references
+// ─────────────────────────────────────────────────────────────────────────────
+bool   showPreviousDay  = input.bool(true, "Show previous day high / low", group = G_REFS)
+string previousDayBasis = input.string("Exchange daily bar", "Previous-day source",
+     options = ["Exchange daily bar", "Custom RTH session"], group = G_REFS,
+     tooltip = "Exchange daily bar uses the symbol's confirmed prior daily candle. Custom RTH uses the RTH session defined above.")
+bool showPreviousWeek   = input.bool(true, "Show previous week high / low", group = G_REFS)
+string referenceStyle   = input.string("Dashed", "Reference line style", options = ["Solid", "Dashed", "Dotted"], group = G_REFS)
+int referenceLineWidth  = input.int(1, "Reference line width", minval = 1, maxval = 4, group = G_REFS)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Fibonacci and projections
+// ─────────────────────────────────────────────────────────────────────────────
+bool   showFib          = input.bool(false, "Show Fibonacci levels", group = G_FIB)
+string fibAnchor        = input.string("Initial Balance", "Anchor range",
+     options = ["Opening Range", "Initial Balance", "Overnight", "Previous Day", "Previous Week"], group = G_FIB)
+bool showFibRetracements = input.bool(true, "Show internal retracements", group = G_FIB)
+bool showFibExtensions   = input.bool(true, "Show symmetric range projections", group = G_FIB)
+
+float fibRetrace1       = input.float(0.382, "Retracement 1", minval = 0.0, maxval = 1.0, step = 0.001, inline = "fr1", group = G_FIB)
+float fibRetrace2       = input.float(0.500, "Retracement 2", minval = 0.0, maxval = 1.0, step = 0.001, inline = "fr2", group = G_FIB)
+float fibRetrace3       = input.float(0.618, "Retracement 3", minval = 0.0, maxval = 1.0, step = 0.001, inline = "fr3", group = G_FIB)
+float fibProjection1    = input.float(0.272, "Projection 1", minval = 0.0, maxval = 5.0, step = 0.001, inline = "fp1", group = G_FIB,
+     tooltip = "0.272 projects the range to the conventional 1.272 / −0.272 levels.")
+float fibProjection2    = input.float(0.618, "Projection 2", minval = 0.0, maxval = 5.0, step = 0.001, inline = "fp2", group = G_FIB)
+float fibProjection3    = input.float(1.000, "Projection 3", minval = 0.0, maxval = 5.0, step = 0.001, inline = "fp3", group = G_FIB)
+string fibLineStyle     = input.string("Dotted", "Fib line style", options = ["Solid", "Dashed", "Dotted"], group = G_FIB)
+int fibLineWidth        = input.int(1, "Fib line width", minval = 1, maxval = 3, group = G_FIB)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Clustering
+// ─────────────────────────────────────────────────────────────────────────────
+bool showClusters       = input.bool(true, "Show current confluence clusters", group = G_CLUSTER)
+bool clusterReferences  = input.bool(true, "Include day / week references", group = G_CLUSTER)
+bool clusterSessions    = input.bool(true, "Include OR / IB / overnight", group = G_CLUSTER)
+bool clusterVWAP        = input.bool(true, "Include VWAP / bands", group = G_CLUSTER)
+bool clusterFib         = input.bool(true, "Include visible Fib levels", group = G_CLUSTER)
+string clusterToleranceMode = input.string("Ticks", "Tolerance mode", options = ["Ticks", "ATR"], group = G_CLUSTER)
+float clusterTicks      = input.float(8.0, "Tolerance (ticks)", minval = 0.25, step = 0.25, group = G_CLUSTER)
+int   clusterAtrLength  = input.int(14, "ATR length", minval = 2, maxval = 200, group = G_CLUSTER)
+float clusterAtrFactor  = input.float(0.08, "ATR tolerance factor", minval = 0.001, maxval = 2.0, step = 0.005, group = G_CLUSTER)
+int   clusterMinimum    = input.int(2, "Minimum contributors", minval = 2, maxval = 10, group = G_CLUSTER)
+int   clusterMaximum    = input.int(5, "Maximum displayed clusters", minval = 1, maxval = 10, group = G_CLUSTER)
+int   clusterLeftBars   = input.int(18, "Zone width left (bars)", minval = 1, maxval = 300, group = G_CLUSTER)
+int   clusterRightBars  = input.int(24, "Zone width right (bars)", minval = 1, maxval = 300, group = G_CLUSTER)
+float clusterPaddingTicks = input.float(1.0, "Zone padding (ticks)", minval = 0.0, maxval = 20.0, step = 0.25, group = G_CLUSTER)
+bool  showClusterNames  = input.bool(true, "Show contributor names", group = G_CLUSTER)
+int   clusterFillOpacity = input.int(89, "Zone transparency", minval = 60, maxval = 100, group = G_CLUSTER)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Acceptance / rejection
+// ─────────────────────────────────────────────────────────────────────────────
+bool showStates          = input.bool(true, "Enable acceptance / rejection engine", group = G_STATE)
+bool stateAwareColors    = input.bool(false, "Recolor levels by latest state", group = G_STATE)
+string stateToleranceMode = input.string("Ticks", "Touch tolerance mode", options = ["Ticks", "ATR"], group = G_STATE)
+float stateTouchTicks    = input.float(4.0, "Touch tolerance (ticks)", minval = 0.25, step = 0.25, group = G_STATE)
+int   stateAtrLength     = input.int(14, "State ATR length", minval = 2, maxval = 200, group = G_STATE)
+float stateTouchAtr      = input.float(0.04, "Touch tolerance (ATR)", minval = 0.001, maxval = 1.0, step = 0.005, group = G_STATE)
+float stateAcceptTicks   = input.float(2.0, "Acceptance buffer (ticks)", minval = 0.0, step = 0.25, group = G_STATE)
+int   stateAcceptCloses  = input.int(2, "Closes required for acceptance", minval = 1, maxval = 10, group = G_STATE)
+float stateMinimumWick   = input.float(0.08, "Minimum rejection wick (ATR)", minval = 0.0, maxval = 2.0, step = 0.01, group = G_STATE)
+bool  showStateLabels    = input.bool(false, "Show acceptance / rejection labels", group = G_STATE)
+int   maximumStateLabels = input.int(60, "Maximum state labels", minval = 5, maxval = 180, group = G_STATE)
+int   stateCooldownBars  = input.int(3, "Per-level rejection cooldown (bars)", minval = 0, maxval = 100, group = G_STATE)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Theme
+// ─────────────────────────────────────────────────────────────────────────────
+color accentColor       = input.color(color.rgb(168, 85, 247), "Meridian accent", group = G_THEME)
+color secondaryColor    = input.color(color.rgb(99, 102, 241), "Secondary accent", group = G_THEME)
+color vwapColor         = input.color(color.rgb(45, 212, 191), "VWAP", group = G_THEME)
+color dayReferenceColor = input.color(color.rgb(196, 181, 253), "Previous day", group = G_THEME)
+color weekReferenceColor = input.color(color.rgb(139, 92, 246), "Previous week", group = G_THEME)
+color overnightColor    = input.color(color.rgb(148, 163, 184), "Overnight", group = G_THEME)
+color supportColor      = input.color(color.rgb(34, 197, 94), "Bullish state", group = G_THEME)
+color resistanceColor   = input.color(color.rgb(239, 68, 68), "Bearish state", group = G_THEME)
+color neutralColor      = input.color(color.rgb(148, 163, 184), "Neutral / muted", group = G_THEME)
+color panelColor        = input.color(color.rgb(15, 23, 42), "HUD background", group = G_THEME)
+color textColor         = input.color(color.rgb(241, 245, 249), "HUD text", group = G_THEME)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HUD and alerts
+// ─────────────────────────────────────────────────────────────────────────────
+bool   showHUD           = input.bool(true, "Show compact HUD", group = G_HUD)
+string hudPosition       = input.string("Bottom Right", "HUD position", options = ["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group = G_HUD)
+string hudTextSize       = input.string("Small", "HUD text size", options = ["Tiny", "Small", "Normal"], group = G_HUD)
+bool   enableDynamicAlerts = input.bool(false, "Enable dynamic JSON alert() calls", group = G_HUD,
+     tooltip = "Create an alert using: Any alert() function call. State events are confirmed at bar close.")
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────────
+f_line_style(string styleName) =>
+    switch styleName
+        "Solid"  => line.style_solid
+        "Dashed" => line.style_dashed
+        => line.style_dotted
+
+f_label_size(string sizeName) =>
+    switch sizeName
+        "Tiny"   => size.tiny
+        "Normal" => size.normal
+        => size.small
+
+f_table_position(string positionName) =>
+    switch positionName
+        "Top Left"     => position.top_left
+        "Bottom Right" => position.bottom_right
+        "Bottom Left"  => position.bottom_left
+        => position.top_right
+
+f_session_active(string sessionString, string timezoneString) =>
+    not na(time(timeframe.period, sessionString, timezoneString))
+
+f_window_active(int hourValue, int minuteValue, int durationMinutes, string timezoneString) =>
+    int startTimestamp = timestamp(timezoneString, year(time, timezoneString), month(time, timezoneString), dayofmonth(time, timezoneString), hourValue, minuteValue)
+    int endTimestamp = startTimestamp + durationMinutes * 60 * 1000
+    timeframe.isintraday and time < endTimestamp and time_close > startTimestamp
+
+f_bar_hits_time(int hourValue, int minuteValue, string timezoneString) =>
+    int markerTimestamp = timestamp(timezoneString, year(time, timezoneString), month(time, timezoneString), dayofmonth(time, timezoneString), hourValue, minuteValue)
+    timeframe.isintraday and time <= markerTimestamp and time_close > markerTimestamp
+
+f_level_tag(string name, float price) =>
+    showPriceInTags ? name + "  " + str.tostring(price, format.mintick) : name
+
+f_horizontal_label_y(float price) =>
+    price + horizontalLabelOffsetTicks * syminfo.mintick
+
+f_append_name(string existing, string newName, int contributorCount) =>
+    contributorCount <= 6 ? (str.length(existing) == 0 ? newName : existing + " · " + newName) : existing
+
+f_push_level(float[] prices, string[] names, float[] weights, bool condition, float price, string name, float weight) =>
+    if condition and not na(price)
+        array.push(prices, price)
+        array.push(names, name)
+        array.push(weights, weight)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Session engine
+// ─────────────────────────────────────────────────────────────────────────────
+bool inFutures   = f_session_active(futuresSession, sessionTimezone)
+bool inOvernight = f_session_active(overnightSession, sessionTimezone)
+bool inRTH       = f_session_active(rthSession, sessionTimezone)
+int openingRangeMinutes = switch openingRangeDuration
+    "1 Minute"  => 1
+    "5 Minutes" => 5
+    "30 Minutes" => 30
+    => 15
+bool inOR        = inRTH and f_window_active(rthOpenHour, rthOpenMinute, openingRangeMinutes, sessionTimezone)
+bool inIB        = inRTH and f_window_active(rthOpenHour, rthOpenMinute, initialBalanceMinutes, sessionTimezone)
+
+bool newFutures   = inFutures and not inFutures[1]
+bool newOvernight = inOvernight and not inOvernight[1]
+bool newRTH       = inRTH and not inRTH[1]
+bool endRTH       = not inRTH and inRTH[1]
+bool newOR        = inOR and not inOR[1]
+bool newIB        = inIB and not inIB[1]
+bool newWeek      = timeframe.change("W")
+
+var int futuresStartBar   = bar_index
+var int overnightStartBar = bar_index
+var int rthStartBar       = bar_index
+var int rthEndBar         = na
+var int orStartBar        = bar_index
+var int ibStartBar        = bar_index
+var int weekStartBar      = bar_index
+
+if newFutures
+    futuresStartBar := bar_index
+if newOvernight
+    overnightStartBar := bar_index
+if newRTH
+    rthStartBar := bar_index
+    rthEndBar := na
+if endRTH
+    rthEndBar := math.max(rthStartBar, bar_index - 1)
+if newOR
+    orStartBar := bar_index
+if newIB
+    ibStartBar := bar_index
+if newWeek
+    weekStartBar := bar_index
+
+// Full-session and RTH opens.
+var float futuresOpen = na
+var float rthOpen = na
+if newFutures or (na(futuresOpen) and inFutures)
+    futuresOpen := open
+if newRTH or (na(rthOpen) and inRTH)
+    rthOpen := open
+
+// RTH range, plus retained prior custom RTH range.
+var float rthHigh = na
+var float rthLow = na
+var float previousRthHigh = na
+var float previousRthLow = na
+
+if newRTH
+    if not na(rthHigh) and not na(rthLow)
+        previousRthHigh := rthHigh
+        previousRthLow := rthLow
+    rthHigh := high
+    rthLow := low
+else if inRTH
+    rthHigh := na(rthHigh) ? high : math.max(rthHigh, high)
+    rthLow := na(rthLow) ? low : math.min(rthLow, low)
+
+// Overnight range retained through the following RTH.
+var float overnightHigh = na
+var float overnightLow = na
+if newOvernight
+    overnightHigh := high
+    overnightLow := low
+else if inOvernight
+    overnightHigh := na(overnightHigh) ? high : math.max(overnightHigh, high)
+    overnightLow := na(overnightLow) ? low : math.min(overnightLow, low)
+float overnightMid = (overnightHigh + overnightLow) * 0.5
+
+// Opening Range.
+var float orHigh = na
+var float orLow = na
+if newRTH
+    orHigh := na
+    orLow := na
+if newOR
+    orHigh := high
+    orLow := low
+else if inOR
+    orHigh := na(orHigh) ? high : math.max(orHigh, high)
+    orLow := na(orLow) ? low : math.min(orLow, low)
+float orMid = (orHigh + orLow) * 0.5
+bool orReadyForDisplay = not na(orHigh) and not na(orLow) and (showORDeveloping or not inOR)
+bool orReadyForState = not na(orHigh) and not na(orLow) and not inOR
+
+// Initial Balance.
+var float ibHigh = na
+var float ibLow = na
+if newRTH
+    ibHigh := na
+    ibLow := na
+if newIB
+    ibHigh := high
+    ibLow := low
+else if inIB
+    ibHigh := na(ibHigh) ? high : math.max(ibHigh, high)
+    ibLow := na(ibLow) ? low : math.min(ibLow, low)
+float ibMid = (ibHigh + ibLow) * 0.5
+bool ibReadyForDisplay = not na(ibHigh) and not na(ibLow) and (showIBDeveloping or not inIB)
+bool ibReadyForState = not na(ibHigh) and not na(ibLow) and not inIB
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Confirmed higher-timeframe references
+// ─────────────────────────────────────────────────────────────────────────────
+string standardTicker = ticker.standard(syminfo.tickerid)
+[exchangePreviousHigh, exchangePreviousLow] = request.security(
+     standardTicker, "D", [high[1], low[1]],
+     gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+[previousWeekHigh, previousWeekLow] = request.security(
+     standardTicker, "W", [high[1], low[1]],
+     gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+
+float previousDayHigh = previousDayBasis == "Custom RTH session" ? previousRthHigh : exchangePreviousHigh
+float previousDayLow  = previousDayBasis == "Custom RTH session" ? previousRthLow : exchangePreviousLow
+
+// Reset current reference segments when confirmed reference values roll.
+var float lastPreviousDayHigh = na
+var float lastPreviousWeekHigh = na
+if not na(previousDayHigh) and (na(lastPreviousDayHigh) or previousDayHigh != lastPreviousDayHigh)
+    futuresStartBar := bar_index
+    lastPreviousDayHigh := previousDayHigh
+if not na(previousWeekHigh) and (na(lastPreviousWeekHigh) or previousWeekHigh != lastPreviousWeekHigh)
+    weekStartBar := bar_index
+    lastPreviousWeekHigh := previousWeekHigh
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Custom VWAP and deviation engine
+// ─────────────────────────────────────────────────────────────────────────────
+bool vwapInAnchor = switch vwapAnchor
+    "RTH"                  => inRTH
+    "Full Futures Session" => inFutures
+    => true
+
+bool vwapReset = switch vwapAnchor
+    "RTH"                  => newRTH
+    "Full Futures Session" => newFutures
+    => newWeek
+
+var float cumulativeVolume = 0.0
+var float cumulativePV = 0.0
+var float cumulativeP2V = 0.0
+var float cumulativePrice = 0.0
+var float cumulativePrice2 = 0.0
+var int cumulativeBars = 0
+
+float currentVolume = nz(volume, 0.0)
+if vwapReset
+    cumulativeVolume := 0.0
+    cumulativePV := 0.0
+    cumulativeP2V := 0.0
+    cumulativePrice := 0.0
+    cumulativePrice2 := 0.0
+    cumulativeBars := 0
+
+if vwapInAnchor
+    cumulativeVolume += currentVolume
+    cumulativePV += vwapSource * currentVolume
+    cumulativeP2V += vwapSource * vwapSource * currentVolume
+    cumulativePrice += vwapSource
+    cumulativePrice2 += vwapSource * vwapSource
+    cumulativeBars += 1
+
+float customVWAP = cumulativeVolume > 0.0 ? cumulativePV / cumulativeVolume : na
+float volumeWeightedVariance = cumulativeVolume > 0.0 and not na(customVWAP) ?
+     math.max(cumulativeP2V / cumulativeVolume - customVWAP * customVWAP, 0.0) : na
+float unweightedMean = cumulativeBars > 0 ? cumulativePrice / cumulativeBars : na
+float unweightedVariance = cumulativeBars > 0 and not na(unweightedMean) ?
+     math.max(cumulativePrice2 / cumulativeBars - unweightedMean * unweightedMean, 0.0) : na
+float customDeviation = deviationMethod == "Volume-weighted" ? math.sqrt(volumeWeightedVariance) : math.sqrt(unweightedVariance)
+
+float vwapUpper1 = customVWAP + customDeviation * bandMult1
+float vwapLower1 = customVWAP - customDeviation * bandMult1
+float vwapUpper2 = customVWAP + customDeviation * bandMult2
+float vwapLower2 = customVWAP - customDeviation * bandMult2
+float vwapUpper3 = customVWAP + customDeviation * bandMult3
+float vwapLower3 = customVWAP - customDeviation * bandMult3
+bool vwapVisible = showVWAP and (vwapInAnchor or carryVWAP or vwapAnchor == "Week")
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Fibonacci anchor and levels
+// ─────────────────────────────────────────────────────────────────────────────
+float fibLow = switch fibAnchor
+    "Opening Range"  => orReadyForState ? orLow : na
+    "Initial Balance" => ibReadyForState ? ibLow : na
+    "Overnight"      => not inOvernight ? overnightLow : na
+    "Previous Day"   => previousDayLow
+    => previousWeekLow
+
+float fibHigh = switch fibAnchor
+    "Opening Range"  => orReadyForState ? orHigh : na
+    "Initial Balance" => ibReadyForState ? ibHigh : na
+    "Overnight"      => not inOvernight ? overnightHigh : na
+    "Previous Day"   => previousDayHigh
+    => previousWeekHigh
+
+int fibStartBar = switch fibAnchor
+    "Opening Range"  => orStartBar
+    "Initial Balance" => ibStartBar
+    "Overnight"      => overnightStartBar
+    "Previous Day"   => futuresStartBar
+    => weekStartBar
+
+float fibRange = fibHigh - fibLow
+bool fibReady = showFib and not na(fibLow) and not na(fibHigh) and fibRange > syminfo.mintick
+
+float fibR1 = fibReady ? fibLow + fibRange * fibRetrace1 : na
+float fibR2 = fibReady ? fibLow + fibRange * fibRetrace2 : na
+float fibR3 = fibReady ? fibLow + fibRange * fibRetrace3 : na
+float fibUp1 = fibReady ? fibHigh + fibRange * fibProjection1 : na
+float fibUp2 = fibReady ? fibHigh + fibRange * fibProjection2 : na
+float fibUp3 = fibReady ? fibHigh + fibRange * fibProjection3 : na
+float fibDown1 = fibReady ? fibLow - fibRange * fibProjection1 : na
+float fibDown2 = fibReady ? fibLow - fibRange * fibProjection2 : na
+float fibDown3 = fibReady ? fibLow - fibRange * fibProjection3 : na
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Acceptance / rejection engine
+// ─────────────────────────────────────────────────────────────────────────────
+const int TRACKED_LEVELS = 17
+const int IDX_PDH  = 0
+const int IDX_PDL  = 1
+const int IDX_PWH  = 2
+const int IDX_PWL  = 3
+const int IDX_ORH  = 4
+const int IDX_ORL  = 5
+const int IDX_IBH  = 6
+const int IDX_IBL  = 7
+const int IDX_ONH  = 8
+const int IDX_ONL  = 9
+const int IDX_VWAP = 10
+const int IDX_VU1  = 11
+const int IDX_VL1  = 12
+const int IDX_FU1  = 13
+const int IDX_FD1  = 14
+const int IDX_RTHO = 15
+const int IDX_FUTO = 16
+
+var float[] trackedPrices = array.new_float(TRACKED_LEVELS, na)
+var string[] trackedNames = array.from(
+     "PDH", "PDL", "PWH", "PWL", "ORH", "ORL", "IBH", "IBL", "ONH", "ONL",
+     "VWAP", "VWAP +1σ", "VWAP −1σ", "Fib Up 1", "Fib Down 1", "RTH Open", "Session Open")
+var float[] trackedWeights = array.from(
+     2.20, 2.20, 2.40, 2.40, 1.70, 1.70, 1.90, 1.90, 1.45, 1.45,
+     1.35, 1.10, 1.10, 0.80, 0.80, 1.15, 1.15)
+var int[] aboveCounts = array.new_int(TRACKED_LEVELS, 0)
+var int[] belowCounts = array.new_int(TRACKED_LEVELS, 0)
+var int[] levelStates = array.new_int(TRACKED_LEVELS, 0)
+var float[] priorTrackedPrices = array.new_float(TRACKED_LEVELS, na)
+var int[] lastStateEventBars = array.new_int(TRACKED_LEVELS, -1000000)
+
+array.set(trackedPrices, IDX_PDH,  showPreviousDay ? previousDayHigh : na)
+array.set(trackedPrices, IDX_PDL,  showPreviousDay ? previousDayLow : na)
+array.set(trackedPrices, IDX_PWH,  showPreviousWeek ? previousWeekHigh : na)
+array.set(trackedPrices, IDX_PWL,  showPreviousWeek ? previousWeekLow : na)
+array.set(trackedPrices, IDX_ORH,  showOR and inRTH and orReadyForState ? orHigh : na)
+array.set(trackedPrices, IDX_ORL,  showOR and inRTH and orReadyForState ? orLow : na)
+array.set(trackedPrices, IDX_IBH,  showIB and inRTH and ibReadyForState ? ibHigh : na)
+array.set(trackedPrices, IDX_IBL,  showIB and inRTH and ibReadyForState ? ibLow : na)
+array.set(trackedPrices, IDX_ONH,  showOvernight and not inOvernight ? overnightHigh : na)
+array.set(trackedPrices, IDX_ONL,  showOvernight and not inOvernight ? overnightLow : na)
+array.set(trackedPrices, IDX_VWAP, vwapVisible ? customVWAP : na)
+array.set(trackedPrices, IDX_VU1,  vwapVisible and showBand1 ? vwapUpper1 : na)
+array.set(trackedPrices, IDX_VL1,  vwapVisible and showBand1 ? vwapLower1 : na)
+array.set(trackedPrices, IDX_FU1,  fibReady and showFibExtensions ? fibUp1 : na)
+array.set(trackedPrices, IDX_FD1,  fibReady and showFibExtensions ? fibDown1 : na)
+array.set(trackedPrices, IDX_RTHO, showSessionOpens and not na(rthOpen) ? rthOpen : na)
+array.set(trackedPrices, IDX_FUTO, showSessionOpens and not na(futuresOpen) ? futuresOpen : na)
+
+float clusterATR = ta.atr(clusterAtrLength)
+float stateATR = ta.atr(stateAtrLength)
+float stateTouchTolerance = stateToleranceMode == "ATR" ? nz(stateATR) * stateTouchAtr : stateTouchTicks * syminfo.mintick
+float stateAcceptBuffer = stateAcceptTicks * syminfo.mintick
+float upperWick = high - math.max(open, close)
+float lowerWick = math.min(open, close) - low
+
+int bestEventCode = 0
+int bestEventIndex = -1
+float bestEventPrice = na
+float bestEventScore = -1.0
+
+bool stateAcceptedAbove = false
+bool stateAcceptedBelow = false
+bool stateRejectedUp = false
+bool stateRejectedDown = false
+
+if indicatorEnabled and showStates and barstate.isconfirmed
+    for i = 0 to TRACKED_LEVELS - 1
+        float levelPrice = array.get(trackedPrices, i)
+        float previousTrackedPrice = array.get(priorTrackedPrices, i)
+        bool isDynamicVWAP = i >= IDX_VWAP and i <= IDX_VL1
+        bool levelChanged = not na(levelPrice) and not na(previousTrackedPrice) and math.abs(levelPrice - previousTrackedPrice) > math.max(stateTouchTolerance, syminfo.mintick * 2.0)
+
+        if na(levelPrice)
+            array.set(aboveCounts, i, 0)
+            array.set(belowCounts, i, 0)
+            array.set(levelStates, i, 0)
+        else
+            if levelChanged and not isDynamicVWAP
+                array.set(aboveCounts, i, 0)
+                array.set(belowCounts, i, 0)
+                array.set(levelStates, i, 0)
+
+            bool aboveLevel = close > levelPrice + stateAcceptBuffer
+            bool belowLevel = close < levelPrice - stateAcceptBuffer
+            int nextAboveCount = aboveLevel ? array.get(aboveCounts, i) + 1 : 0
+            int nextBelowCount = belowLevel ? array.get(belowCounts, i) + 1 : 0
+            array.set(aboveCounts, i, nextAboveCount)
+            array.set(belowCounts, i, nextBelowCount)
+
+            bool acceptedAbove = nextAboveCount == stateAcceptCloses
+            bool acceptedBelow = nextBelowCount == stateAcceptCloses
+
+            bool priorBelow = close[1] < levelPrice
+            bool priorAbove = close[1] > levelPrice
+            bool bearishRejection = priorBelow and high >= levelPrice - stateTouchTolerance and close < levelPrice - stateAcceptBuffer and upperWick >= nz(stateATR) * stateMinimumWick
+            bool bullishRejection = priorAbove and low <= levelPrice + stateTouchTolerance and close > levelPrice + stateAcceptBuffer and lowerWick >= nz(stateATR) * stateMinimumWick
+
+            int rawEventCode = acceptedAbove ? 1 : acceptedBelow ? -1 : bullishRejection ? 2 : bearishRejection ? -2 : 0
+            int previousEventBar = array.get(lastStateEventBars, i)
+            bool cooldownComplete = math.abs(rawEventCode) == 1 or bar_index - previousEventBar > stateCooldownBars
+            int eventCode = cooldownComplete ? rawEventCode : 0
+            if eventCode != 0
+                array.set(lastStateEventBars, i, bar_index)
+                float eventPriority = (math.abs(eventCode) == 1 ? 2.0 : 1.0) * array.get(trackedWeights, i)
+                float normalizedDistance = nz(stateATR) > 0.0 ? math.abs(close - levelPrice) / stateATR : math.abs(close - levelPrice) / syminfo.mintick
+                float eventScore = eventPriority / (1.0 + normalizedDistance)
+                if eventScore > bestEventScore
+                    bestEventCode := eventCode
+                    bestEventIndex := i
+                    bestEventPrice := levelPrice
+                    bestEventScore := eventScore
+
+            if acceptedAbove
+                array.set(levelStates, i, 1)
+            else if acceptedBelow
+                array.set(levelStates, i, -1)
+            else if bullishRejection
+                array.set(levelStates, i, 2)
+            else if bearishRejection
+                array.set(levelStates, i, -2)
+
+        array.set(priorTrackedPrices, i, levelPrice)
+
+stateAcceptedAbove := bestEventCode == 1
+stateAcceptedBelow := bestEventCode == -1
+stateRejectedUp := bestEventCode == 2
+stateRejectedDown := bestEventCode == -2
+
+string bestEventName = bestEventIndex >= 0 ? array.get(trackedNames, bestEventIndex) : ""
+string bestEventState = switch bestEventCode
+    1  => "accepted_above"
+    -1 => "accepted_below"
+    2  => "bullish_rejection"
+    -2 => "bearish_rejection"
+    => ""
+
+var string lastEventName = "None"
+var string lastEventState = "Waiting"
+var float lastEventPrice = na
+var int lastEventTime = na
+
+if bestEventCode != 0
+    lastEventName := bestEventName
+    lastEventState := switch bestEventCode
+        1  => "Accepted above"
+        -1 => "Accepted below"
+        2  => "Bullish rejection"
+        => "Bearish rejection"
+    lastEventPrice := bestEventPrice
+    lastEventTime := time
+
+// State labels are kept in a bounded queue.
+var label[] stateEventLabels = array.new_label()
+if bestEventCode != 0 and showStateLabels
+    bool bullishEvent = bestEventCode > 0
+    string eventText = switch bestEventCode
+        1  => "ACCEPT ↑\n" + bestEventName
+        -1 => "ACCEPT ↓\n" + bestEventName
+        2  => "REJECT ↑\n" + bestEventName
+        => "REJECT ↓\n" + bestEventName
+    label eventLabel = label.new(
+         x = bar_index,
+         y = bestEventPrice,
+         text = eventText,
+         xloc = xloc.bar_index,
+         style = bullishEvent ? label.style_label_up : label.style_label_down,
+         color = color.new(bullishEvent ? supportColor : resistanceColor, 8),
+         textcolor = color.white,
+         size = size.tiny)
+    array.push(stateEventLabels, eventLabel)
+    if array.size(stateEventLabels) > maximumStateLabels
+        label.delete(array.shift(stateEventLabels))
+
+if enableDynamicAlerts and bestEventCode != 0
+    string jsonMessage = "{" +
+         "\"source\":\"meridian_futures_levels\"," +
+         "\"version\":\"0.1.4\"," +
+         "\"event\":\"level_state\"," +
+         "\"symbol\":\"" + syminfo.tickerid + "\"," +
+         "\"timeframe\":\"" + timeframe.period + "\"," +
+         "\"level\":\"" + bestEventName + "\"," +
+         "\"state\":\"" + bestEventState + "\"," +
+         "\"price\":" + str.tostring(bestEventPrice, format.mintick) + "," +
+         "\"close\":" + str.tostring(close, format.mintick) + "," +
+         "\"bar_time\":" + str.tostring(time) + "}"
+    alert(jsonMessage, alert.freq_once_per_bar_close)
+
+// State-aware level colors.
+f_state_color(int index, color baseColor) =>
+    int currentState = array.get(levelStates, index)
+    stateAwareColors and currentState > 0 ? supportColor : stateAwareColors and currentState < 0 ? resistanceColor : baseColor
+
+color pdhColor = f_state_color(IDX_PDH, dayReferenceColor)
+color pdlColor = f_state_color(IDX_PDL, dayReferenceColor)
+color pwhColor = f_state_color(IDX_PWH, weekReferenceColor)
+color pwlColor = f_state_color(IDX_PWL, weekReferenceColor)
+color orhColor = f_state_color(IDX_ORH, accentColor)
+color orlColor = f_state_color(IDX_ORL, accentColor)
+color ibhColor = f_state_color(IDX_IBH, secondaryColor)
+color iblColor = f_state_color(IDX_IBL, secondaryColor)
+color onhColor = f_state_color(IDX_ONH, overnightColor)
+color onlColor = f_state_color(IDX_ONL, overnightColor)
+color liveVWAPColor = f_state_color(IDX_VWAP, vwapColor)
+
+// Hide plot badges from the right price scale by default while preserving the plots.
+meridianPlotDisplay = showPriceScaleValues ? display.all : display.all - display.price_scale
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Session shading and plots
+// ─────────────────────────────────────────────────────────────────────────────
+color sessionShade = inOR ? color.new(accentColor, 91) : inRTH ? color.new(secondaryColor, 96) : inOvernight ? color.new(overnightColor, 97) : na
+bgcolor(indicatorEnabled and showSessionShading ? sessionShade : na, title = "Session shading")
+
+bool orVisualReady = indicatorEnabled and showOR and orReadyForDisplay
+bool ibVisualReady = indicatorEnabled and showIB and ibReadyForDisplay
+
+// Price-scale badges are optional. The visible OR/IB geometry is drawn with
+// reusable line/box objects so completed ranges can extend backward to 09:30.
+plot(orVisualReady and inRTH ? orHigh : na, "Opening Range High", color = orhColor, linewidth = 1,
+     display = showPriceScaleValues ? display.price_scale : display.none)
+plot(orVisualReady and inRTH ? orLow : na, "Opening Range Low", color = orlColor, linewidth = 1,
+     display = showPriceScaleValues ? display.price_scale : display.none)
+plot(orVisualReady and showORMid and inRTH ? orMid : na, "Opening Range Mid", color = color.new(accentColor, 18), linewidth = 1,
+     display = showPriceScaleValues ? display.price_scale : display.none)
+plot(ibVisualReady and inRTH ? ibHigh : na, "Initial Balance High", color = ibhColor, linewidth = 1,
+     display = showPriceScaleValues ? display.price_scale : display.none)
+plot(ibVisualReady and inRTH ? ibLow : na, "Initial Balance Low", color = iblColor, linewidth = 1,
+     display = showPriceScaleValues ? display.price_scale : display.none)
+plot(ibVisualReady and showIBMid and inRTH ? ibMid : na, "Initial Balance Mid", color = color.new(secondaryColor, 18), linewidth = 1,
+     display = showPriceScaleValues ? display.price_scale : display.none)
+
+var line orHighGuide = na
+var line orLowGuide = na
+var line orMidGuide = na
+var box orRangeBox = na
+var line ibHighGuide = na
+var line ibLowGuide = na
+var line ibMidGuide = na
+var box ibRangeBox = na
+
+if barstate.islast
+    int rangeEndX = inRTH ? bar_index : nz(rthEndBar, bar_index)
+    int safeOrStart = math.max(orStartBar, bar_index - 9999)
+    int safeIbStart = math.max(ibStartBar, bar_index - 9999)
+
+    if orVisualReady
+        if na(orHighGuide)
+            orHighGuide := line.new(safeOrStart, orHigh, rangeEndX, orHigh, xloc = xloc.bar_index,
+                 extend = extend.none, color = orhColor, style = line.style_solid, width = orLineWidth)
+            orLowGuide := line.new(safeOrStart, orLow, rangeEndX, orLow, xloc = xloc.bar_index,
+                 extend = extend.none, color = orlColor, style = line.style_solid, width = orLineWidth)
+        else
+            line.set_xy1(orHighGuide, safeOrStart, orHigh)
+            line.set_xy2(orHighGuide, rangeEndX, orHigh)
+            line.set_color(orHighGuide, orhColor)
+            line.set_width(orHighGuide, orLineWidth)
+            line.set_xy1(orLowGuide, safeOrStart, orLow)
+            line.set_xy2(orLowGuide, rangeEndX, orLow)
+            line.set_color(orLowGuide, orlColor)
+            line.set_width(orLowGuide, orLineWidth)
+
+        if showORMid
+            if na(orMidGuide)
+                orMidGuide := line.new(safeOrStart, orMid, rangeEndX, orMid, xloc = xloc.bar_index,
+                     extend = extend.none, color = color.new(accentColor, 12), style = line.style_dotted, width = 1)
+            else
+                line.set_xy1(orMidGuide, safeOrStart, orMid)
+                line.set_xy2(orMidGuide, rangeEndX, orMid)
+                line.set_color(orMidGuide, color.new(accentColor, 12))
+                line.set_style(orMidGuide, line.style_dotted)
+        else if not na(orMidGuide)
+            line.delete(orMidGuide)
+            orMidGuide := na
+
+        if fillOR
+            if na(orRangeBox)
+                orRangeBox := box.new(safeOrStart, orHigh, rangeEndX, orLow, xloc = xloc.bar_index,
+                     border_color = color.new(accentColor, 100), bgcolor = color.new(accentColor, 92))
+            else
+                box.set_left(orRangeBox, safeOrStart)
+                box.set_right(orRangeBox, rangeEndX)
+                box.set_top(orRangeBox, orHigh)
+                box.set_bottom(orRangeBox, orLow)
+                box.set_bgcolor(orRangeBox, color.new(accentColor, 92))
+        else if not na(orRangeBox)
+            box.delete(orRangeBox)
+            orRangeBox := na
+    else
+        if not na(orHighGuide)
+            line.delete(orHighGuide)
+            orHighGuide := na
+        if not na(orLowGuide)
+            line.delete(orLowGuide)
+            orLowGuide := na
+        if not na(orMidGuide)
+            line.delete(orMidGuide)
+            orMidGuide := na
+        if not na(orRangeBox)
+            box.delete(orRangeBox)
+            orRangeBox := na
+
+    if ibVisualReady
+        if na(ibHighGuide)
+            ibHighGuide := line.new(safeIbStart, ibHigh, rangeEndX, ibHigh, xloc = xloc.bar_index,
+                 extend = extend.none, color = ibhColor, style = line.style_solid, width = ibLineWidth)
+            ibLowGuide := line.new(safeIbStart, ibLow, rangeEndX, ibLow, xloc = xloc.bar_index,
+                 extend = extend.none, color = iblColor, style = line.style_solid, width = ibLineWidth)
+        else
+            line.set_xy1(ibHighGuide, safeIbStart, ibHigh)
+            line.set_xy2(ibHighGuide, rangeEndX, ibHigh)
+            line.set_color(ibHighGuide, ibhColor)
+            line.set_width(ibHighGuide, ibLineWidth)
+            line.set_xy1(ibLowGuide, safeIbStart, ibLow)
+            line.set_xy2(ibLowGuide, rangeEndX, ibLow)
+            line.set_color(ibLowGuide, iblColor)
+            line.set_width(ibLowGuide, ibLineWidth)
+
+        if showIBMid
+            if na(ibMidGuide)
+                ibMidGuide := line.new(safeIbStart, ibMid, rangeEndX, ibMid, xloc = xloc.bar_index,
+                     extend = extend.none, color = color.new(secondaryColor, 18), style = line.style_dotted, width = 1)
+            else
+                line.set_xy1(ibMidGuide, safeIbStart, ibMid)
+                line.set_xy2(ibMidGuide, rangeEndX, ibMid)
+                line.set_color(ibMidGuide, color.new(secondaryColor, 18))
+                line.set_style(ibMidGuide, line.style_dotted)
+        else if not na(ibMidGuide)
+            line.delete(ibMidGuide)
+            ibMidGuide := na
+
+        if fillIB
+            if na(ibRangeBox)
+                ibRangeBox := box.new(safeIbStart, ibHigh, rangeEndX, ibLow, xloc = xloc.bar_index,
+                     border_color = color.new(secondaryColor, 100), bgcolor = color.new(secondaryColor, 93))
+            else
+                box.set_left(ibRangeBox, safeIbStart)
+                box.set_right(ibRangeBox, rangeEndX)
+                box.set_top(ibRangeBox, ibHigh)
+                box.set_bottom(ibRangeBox, ibLow)
+                box.set_bgcolor(ibRangeBox, color.new(secondaryColor, 93))
+        else if not na(ibRangeBox)
+            box.delete(ibRangeBox)
+            ibRangeBox := na
+    else
+        if not na(ibHighGuide)
+            line.delete(ibHighGuide)
+            ibHighGuide := na
+        if not na(ibLowGuide)
+            line.delete(ibLowGuide)
+            ibLowGuide := na
+        if not na(ibMidGuide)
+            line.delete(ibMidGuide)
+            ibMidGuide := na
+        if not na(ibRangeBox)
+            box.delete(ibRangeBox)
+            ibRangeBox := na
+
+float onDisplayHigh = indicatorEnabled and showOvernight and (inRTH or inOvernight) ? overnightHigh : na
+float onDisplayLow  = indicatorEnabled and showOvernight and (inRTH or inOvernight) ? overnightLow : na
+float onDisplayMid  = indicatorEnabled and showOvernight and showOvernightMid and (inRTH or inOvernight) ? overnightMid : na
+plot(onDisplayHigh, "Overnight High", color = onhColor, linewidth = sessionLineWidth, style = plot.style_linebr, display = meridianPlotDisplay)
+plot(onDisplayLow, "Overnight Low", color = onlColor, linewidth = sessionLineWidth, style = plot.style_linebr, display = meridianPlotDisplay)
+plot(onDisplayMid, "Overnight Mid", color = color.new(overnightColor, 45), linewidth = 1, style = plot.style_linebr, display = meridianPlotDisplay)
+
+plot(indicatorEnabled and showSessionOpens and inFutures ? futuresOpen : na, "Futures Session Open",
+     color = color.new(neutralColor, 35), linewidth = 1, style = plot.style_linebr, display = meridianPlotDisplay)
+plot(indicatorEnabled and showSessionOpens and inRTH ? rthOpen : na, "RTH Open",
+     color = color.new(textColor, 30), linewidth = 1, style = plot.style_linebr, display = meridianPlotDisplay)
+
+float plottedVWAP = indicatorEnabled and vwapVisible ? customVWAP : na
+float plottedVU1 = indicatorEnabled and vwapVisible and showBand1 ? vwapUpper1 : na
+float plottedVL1 = indicatorEnabled and vwapVisible and showBand1 ? vwapLower1 : na
+float plottedVU2 = indicatorEnabled and vwapVisible and showBand2 ? vwapUpper2 : na
+float plottedVL2 = indicatorEnabled and vwapVisible and showBand2 ? vwapLower2 : na
+float plottedVU3 = indicatorEnabled and vwapVisible and showBand3 ? vwapUpper3 : na
+float plottedVL3 = indicatorEnabled and vwapVisible and showBand3 ? vwapLower3 : na
+
+pVWAP = plot(plottedVWAP, "Custom VWAP", color = liveVWAPColor, linewidth = vwapLineWidth, style = plot.style_linebr, display = meridianPlotDisplay)
+pVU1 = plot(plottedVU1, "VWAP Upper 1", color = color.new(vwapColor, 15), linewidth = bandLineWidth, style = plot.style_linebr, display = meridianPlotDisplay)
+pVL1 = plot(plottedVL1, "VWAP Lower 1", color = color.new(vwapColor, 15), linewidth = bandLineWidth, style = plot.style_linebr, display = meridianPlotDisplay)
+pVU2 = plot(plottedVU2, "VWAP Upper 2", color = color.new(vwapColor, 40), linewidth = bandLineWidth, style = plot.style_linebr, display = meridianPlotDisplay)
+pVL2 = plot(plottedVL2, "VWAP Lower 2", color = color.new(vwapColor, 40), linewidth = bandLineWidth, style = plot.style_linebr, display = meridianPlotDisplay)
+pVU3 = plot(plottedVU3, "VWAP Upper 3", color = color.new(vwapColor, 62), linewidth = bandLineWidth, style = plot.style_linebr, display = meridianPlotDisplay)
+pVL3 = plot(plottedVL3, "VWAP Lower 3", color = color.new(vwapColor, 62), linewidth = bandLineWidth, style = plot.style_linebr, display = meridianPlotDisplay)
+fill(pVU1, pVL1, color = indicatorEnabled and vwapVisible and showBand1 ? color.new(vwapColor, bandFillOpacity) : na, title = "VWAP Band 1 fill")
+fill(pVU2, pVL2, color = indicatorEnabled and vwapVisible and showBand2 ? color.new(vwapColor, math.min(bandFillOpacity + 3, 100)) : na, title = "VWAP Band 2 fill")
+
+bool compactHorizontalLabels = horizontalLabelMode == "Compact"
+string labelORH = compactHorizontalLabels ? "ORH" : "OPENING RANGE HIGH"
+string labelORL = compactHorizontalLabels ? "ORL" : "OPENING RANGE LOW"
+string labelORM = compactHorizontalLabels ? "ORM" : "OPENING RANGE MID"
+string labelIBH = compactHorizontalLabels ? "IBH" : "INITIAL BALANCE HIGH"
+string labelIBL = compactHorizontalLabels ? "IBL" : "INITIAL BALANCE LOW"
+string labelIBM = compactHorizontalLabels ? "IBM" : "INITIAL BALANCE MID"
+string labelONH = compactHorizontalLabels ? "ONH" : "OVERNIGHT HIGH"
+string labelONL = compactHorizontalLabels ? "ONL" : "OVERNIGHT LOW"
+string labelSessionOpen = compactHorizontalLabels ? "SESSION OPEN" : "FUTURES SESSION OPEN"
+
+// Reused minimal right-edge labels for principal developing/session levels.
+var label[] liveLevelTags = array.new_label(11)
+if barstate.islast
+    float[] liveTagPrices = array.from(orHigh, orLow, orMid, ibHigh, ibLow, ibMid, overnightHigh, overnightLow, customVWAP, rthOpen, futuresOpen)
+    string[] liveTagNames = array.from(labelORH, labelORL, labelORM, labelIBH, labelIBL, labelIBM, labelONH, labelONL, "VWAP", "RTH OPEN", labelSessionOpen)
+    color[] liveTagColors = array.from(orhColor, orlColor, color.new(accentColor, 18), ibhColor, iblColor, color.new(secondaryColor, 18), onhColor, onlColor, liveVWAPColor, color.new(textColor, 20), color.new(neutralColor, 20))
+    bool[] liveTagEnabled = array.from(
+         indicatorEnabled and showLiveLevelTags and showOR and orReadyForDisplay,
+         indicatorEnabled and showLiveLevelTags and showOR and orReadyForDisplay,
+         indicatorEnabled and showLiveLevelTags and showOR and showORMid and orReadyForDisplay,
+         indicatorEnabled and showLiveLevelTags and showIB and ibReadyForDisplay,
+         indicatorEnabled and showLiveLevelTags and showIB and ibReadyForDisplay,
+         indicatorEnabled and showLiveLevelTags and showIB and showIBMid and ibReadyForDisplay,
+         indicatorEnabled and showLiveLevelTags and showOvernight and (inOvernight or inRTH),
+         indicatorEnabled and showLiveLevelTags and showOvernight and (inOvernight or inRTH),
+         indicatorEnabled and showLiveLevelTags and vwapVisible,
+         indicatorEnabled and showLiveLevelTags and showSessionOpens and not na(rthOpen) and inRTH,
+         indicatorEnabled and showLiveLevelTags and showSessionOpens and not na(futuresOpen) and inFutures)
+
+    for i = 0 to 10
+        label currentTag = array.get(liveLevelTags, i)
+        float tagPrice = array.get(liveTagPrices, i)
+        bool tagEnabled = array.get(liveTagEnabled, i) and not na(tagPrice)
+        bool isRthRangeTag = i <= 5
+        int activeRangeTagX = bar_index + horizontalLabelOffsetBars
+        int completedRangeTagX = nz(rthEndBar, bar_index)
+        int tagX = isRthRangeTag ? (inRTH ? activeRangeTagX : completedRangeTagX) : activeRangeTagX
+        color tagColor = array.get(liveTagColors, i)
+        string tagText = f_level_tag(array.get(liveTagNames, i), tagPrice)
+        float tagY = f_horizontal_label_y(tagPrice)
+
+        if tagEnabled
+            if na(currentTag)
+                currentTag := label.new(tagX, tagY, tagText, xloc = xloc.bar_index,
+                     style = label.style_none, color = color.new(tagColor, 100),
+                     textcolor = tagColor, textalign = text.align_right, size = f_label_size(horizontalLabelTextSize))
+                array.set(liveLevelTags, i, currentTag)
+            else
+                label.set_xy(currentTag, tagX, tagY)
+                label.set_text(currentTag, tagText)
+                label.set_color(currentTag, color.new(tagColor, 100))
+                label.set_textcolor(currentTag, tagColor)
+                label.set_textalign(currentTag, text.align_right)
+                label.set_size(currentTag, f_label_size(horizontalLabelTextSize))
+        else
+            if not na(currentTag)
+                label.delete(currentTag)
+                array.set(liveLevelTags, i, na)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Vertical time markers
+// ─────────────────────────────────────────────────────────────────────────────
+var line[] timeMarkerLines = array.new_line()
+var label[] timeMarkerLabels = array.new_label()
+var int[] timeMarkerDayKeys = array.new_int()
+
+int markerDayKey = year(time, sessionTimezone) * 10000 + month(time, sessionTimezone) * 100 + dayofmonth(time, sessionTimezone)
+var int activeMarkerDayKey = na
+var float activeMarkerDayHigh = na
+if na(activeMarkerDayKey) or markerDayKey != activeMarkerDayKey
+    activeMarkerDayKey := markerDayKey
+    activeMarkerDayHigh := high
+else
+    activeMarkerDayHigh := math.max(nz(activeMarkerDayHigh, high), high)
+
+float markerAtr = nz(ta.atr(14), high - low)
+float markerLabelY = activeMarkerDayHigh + markerAtr * timeMarkerTopPaddingAtr
+float markerVerticalSpan = math.max(markerAtr * 2.5, syminfo.mintick * 50.0)
+color markerLineColor = color.new(timeMarkerColor, timeMarkerTransparency)
+color markerTextColor = color.new(timeMarkerColor, 0)
+
+if indicatorEnabled and showTimeMarkers and timeframe.isintraday
+    bool hitPremarket = f_bar_hits_time(8, 30, sessionTimezone)
+    bool hitOpen = f_bar_hits_time(9, 30, sessionTimezone)
+    bool hitKillzoneEnd = f_bar_hits_time(11, 0, sessionTimezone)
+    bool hitClose = f_bar_hits_time(16, 0, sessionTimezone)
+
+    if hitPremarket or hitOpen or hitKillzoneEnd or hitClose
+        int markerTs = hitPremarket ? timestamp(sessionTimezone, year(time, sessionTimezone), month(time, sessionTimezone), dayofmonth(time, sessionTimezone), 8, 30) :
+             hitOpen ? timestamp(sessionTimezone, year(time, sessionTimezone), month(time, sessionTimezone), dayofmonth(time, sessionTimezone), 9, 30) :
+             hitKillzoneEnd ? timestamp(sessionTimezone, year(time, sessionTimezone), month(time, sessionTimezone), dayofmonth(time, sessionTimezone), 11, 0) :
+             timestamp(sessionTimezone, year(time, sessionTimezone), month(time, sessionTimezone), dayofmonth(time, sessionTimezone), 16, 0)
+        string markerTextSingle = hitPremarket ? "PRE-MARKET" : hitOpen ? "MARKET OPEN" : hitKillzoneEnd ? "NY KILLZONE END" : "MARKET CLOSE"
+        string markerText = timeMarkerLabelLayout == "Stacked" ? str.replace_all(markerTextSingle, " ", "\n") : markerTextSingle
+        line markerLine = line.new(markerTs, high + markerVerticalSpan, markerTs, low - markerVerticalSpan,
+             xloc = xloc.bar_time, extend = extend.both, color = markerLineColor, style = line.style_solid, width = 1)
+        array.push(timeMarkerLines, markerLine)
+        if showTimeMarkerLabels
+            label markerLabel = label.new(markerTs, markerLabelY, markerText,
+                 xloc = xloc.bar_time, yloc = yloc.price, style = label.style_none,
+                 color = color.new(timeMarkerColor, 100), textcolor = markerTextColor,
+                 textalign = text.align_center, size = f_label_size(timeMarkerTextSize))
+            array.push(timeMarkerLabels, markerLabel)
+            array.push(timeMarkerDayKeys, markerDayKey)
+
+    while array.size(timeMarkerLines) > maxTimeMarkerEvents
+        line.delete(array.shift(timeMarkerLines))
+    while array.size(timeMarkerLabels) > maxTimeMarkerEvents
+        label.delete(array.shift(timeMarkerLabels))
+        array.shift(timeMarkerDayKeys)
+
+    // Keep today's labels above the developing day high so later candles do not cover them.
+    if barstate.islast and array.size(timeMarkerLabels) > 0
+        for markerIndex = 0 to array.size(timeMarkerLabels) - 1
+            label markerLabel = array.get(timeMarkerLabels, markerIndex)
+            label.set_size(markerLabel, f_label_size(timeMarkerTextSize))
+            if array.get(timeMarkerDayKeys, markerIndex) == markerDayKey
+                label.set_y(markerLabel, markerLabelY)
+else if barstate.islast
+    while array.size(timeMarkerLines) > 0
+        line.delete(array.pop(timeMarkerLines))
+    while array.size(timeMarkerLabels) > 0
+        label.delete(array.pop(timeMarkerLabels))
+    array.clear(timeMarkerDayKeys)
+
+if barstate.islast and not showTimeMarkerLabels
+    while array.size(timeMarkerLabels) > 0
+        label.delete(array.pop(timeMarkerLabels))
+    array.clear(timeMarkerDayKeys)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Current previous-day / previous-week reference segments
+// ─────────────────────────────────────────────────────────────────────────────
+var line[] referenceLines = array.new_line(4)
+var label[] referenceLabels = array.new_label(4)
+
+if barstate.islast
+    float[] referencePrices = array.from(previousDayHigh, previousDayLow, previousWeekHigh, previousWeekLow)
+    string[] referenceNames = array.from(compactHorizontalLabels ? "PDH" : "PRIOR DAY HIGH", compactHorizontalLabels ? "PDL" : "PRIOR DAY LOW", compactHorizontalLabels ? "PWH" : "PRIOR WEEK HIGH", compactHorizontalLabels ? "PWL" : "PRIOR WEEK LOW")
+    color[] referenceColors = array.from(pdhColor, pdlColor, pwhColor, pwlColor)
+    bool[] referenceEnabled = array.from(
+         indicatorEnabled and showPreviousDay,
+         indicatorEnabled and showPreviousDay,
+         indicatorEnabled and showPreviousWeek,
+         indicatorEnabled and showPreviousWeek)
+
+    for i = 0 to 3
+        line existingLine = array.get(referenceLines, i)
+        label existingLabel = array.get(referenceLabels, i)
+        float levelPrice = array.get(referencePrices, i)
+        bool levelEnabled = array.get(referenceEnabled, i) and not na(levelPrice)
+        int startX = math.max(i < 2 ? futuresStartBar : weekStartBar, bar_index - 9999)
+        int endX = bar_index + rightExtension
+        string levelName = array.get(referenceNames, i)
+        color levelColor = array.get(referenceColors, i)
+
+        if levelEnabled
+            if na(existingLine)
+                existingLine := line.new(startX, levelPrice, endX, levelPrice,
+                     xloc = xloc.bar_index, extend = extend.none, color = levelColor,
+                     style = f_line_style(referenceStyle), width = referenceLineWidth)
+                array.set(referenceLines, i, existingLine)
+            else
+                line.set_xy1(existingLine, startX, levelPrice)
+                line.set_xy2(existingLine, endX, levelPrice)
+                line.set_color(existingLine, levelColor)
+                line.set_style(existingLine, f_line_style(referenceStyle))
+                line.set_width(existingLine, referenceLineWidth)
+
+            if showLiveLevelTags
+                string tagText = f_level_tag(levelName, levelPrice)
+                int labelX = bar_index + horizontalLabelOffsetBars
+                float labelY = f_horizontal_label_y(levelPrice)
+                if na(existingLabel)
+                    existingLabel := label.new(labelX, labelY, tagText,
+                         xloc = xloc.bar_index, style = label.style_none,
+                         color = color.new(levelColor, 100), textcolor = levelColor,
+                         textalign = text.align_right, size = f_label_size(horizontalLabelTextSize))
+                    array.set(referenceLabels, i, existingLabel)
+                else
+                    label.set_xy(existingLabel, labelX, labelY)
+                    label.set_text(existingLabel, tagText)
+                    label.set_color(existingLabel, color.new(levelColor, 100))
+                    label.set_textcolor(existingLabel, levelColor)
+                    label.set_textalign(existingLabel, text.align_right)
+                    label.set_size(existingLabel, f_label_size(horizontalLabelTextSize))
+            else
+                if not na(existingLabel)
+                    label.delete(existingLabel)
+                    array.set(referenceLabels, i, na)
+        else
+            if not na(existingLine)
+                line.delete(existingLine)
+                array.set(referenceLines, i, na)
+            if not na(existingLabel)
+                label.delete(existingLabel)
+                array.set(referenceLabels, i, na)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Fibonacci rendering — current anchor only, reused objects
+// ─────────────────────────────────────────────────────────────────────────────
+var line[] fibLines = array.new_line(9)
+var label[] fibLabels = array.new_label(9)
+
+if barstate.islast
+    float[] fibPrices = array.from(fibR1, fibR2, fibR3, fibUp1, fibUp2, fibUp3, fibDown1, fibDown2, fibDown3)
+    string[] fibNames = array.from(
+         str.tostring(fibRetrace1, "#.###"),
+         str.tostring(fibRetrace2, "#.###"),
+         str.tostring(fibRetrace3, "#.###"),
+         str.tostring(1.0 + fibProjection1, "#.###"),
+         str.tostring(1.0 + fibProjection2, "#.###"),
+         str.tostring(1.0 + fibProjection3, "#.###"),
+         str.tostring(-fibProjection1, "#.###"),
+         str.tostring(-fibProjection2, "#.###"),
+         str.tostring(-fibProjection3, "#.###"))
+
+    for i = 0 to 8
+        line fibLine = array.get(fibLines, i)
+        label fibLabel = array.get(fibLabels, i)
+        float levelPrice = array.get(fibPrices, i)
+        bool isRetracement = i <= 2
+        bool levelEnabled = indicatorEnabled and fibReady and not na(levelPrice) and (isRetracement ? showFibRetracements : showFibExtensions)
+        int endX = bar_index + rightExtension
+        color levelColor = isRetracement ? color.new(accentColor, 28) : color.new(accentColor, 5)
+
+        if levelEnabled
+            int safeFibStartBar = math.max(fibStartBar, bar_index - 9999)
+            if na(fibLine)
+                fibLine := line.new(safeFibStartBar, levelPrice, endX, levelPrice,
+                     xloc = xloc.bar_index, extend = extend.none, color = levelColor,
+                     style = f_line_style(fibLineStyle), width = fibLineWidth)
+                array.set(fibLines, i, fibLine)
+            else
+                line.set_xy1(fibLine, safeFibStartBar, levelPrice)
+                line.set_xy2(fibLine, endX, levelPrice)
+                line.set_color(fibLine, levelColor)
+                line.set_style(fibLine, f_line_style(fibLineStyle))
+                line.set_width(fibLine, fibLineWidth)
+
+            if showLiveLevelTags
+                string fibTag = "FIB " + array.get(fibNames, i) + (showPriceInTags ? "  " + str.tostring(levelPrice, format.mintick) : "")
+                int fibLabelX = bar_index + horizontalLabelOffsetBars
+                float fibLabelY = f_horizontal_label_y(levelPrice)
+                if na(fibLabel)
+                    fibLabel := label.new(fibLabelX, fibLabelY, fibTag,
+                         xloc = xloc.bar_index, style = label.style_none,
+                         color = color.new(accentColor, 100), textcolor = accentColor,
+                         textalign = text.align_right, size = f_label_size(horizontalLabelTextSize))
+                    array.set(fibLabels, i, fibLabel)
+                else
+                    label.set_xy(fibLabel, fibLabelX, fibLabelY)
+                    label.set_text(fibLabel, fibTag)
+                    label.set_color(fibLabel, color.new(accentColor, 100))
+                    label.set_textcolor(fibLabel, accentColor)
+                    label.set_textalign(fibLabel, text.align_right)
+                    label.set_size(fibLabel, f_label_size(horizontalLabelTextSize))
+            else
+                if not na(fibLabel)
+                    label.delete(fibLabel)
+                    array.set(fibLabels, i, na)
+        else
+            if not na(fibLine)
+                line.delete(fibLine)
+                array.set(fibLines, i, na)
+            if not na(fibLabel)
+                label.delete(fibLabel)
+                array.set(fibLabels, i, na)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Level clustering — current confluence zones
+// ─────────────────────────────────────────────────────────────────────────────
+var box[] clusterBoxes = array.new_box()
+var label[] clusterLabels = array.new_label()
+
+if barstate.islast
+    int clustersDrawn = 0
+
+    if indicatorEnabled and showClusters
+        float[] sourcePrices = array.new_float()
+        string[] sourceNames = array.new_string()
+        float[] sourceWeights = array.new_float()
+
+        // Previous references.
+        f_push_level(sourcePrices, sourceNames, sourceWeights, clusterReferences and showPreviousDay, previousDayHigh, "PDH", 2.20)
+        f_push_level(sourcePrices, sourceNames, sourceWeights, clusterReferences and showPreviousDay, previousDayLow, "PDL", 2.20)
+        f_push_level(sourcePrices, sourceNames, sourceWeights, clusterReferences and showPreviousWeek, previousWeekHigh, "PWH", 2.40)
+        f_push_level(sourcePrices, sourceNames, sourceWeights, clusterReferences and showPreviousWeek, previousWeekLow, "PWL", 2.40)
+
+        // Session-derived levels.
+        f_push_level(sourcePrices, sourceNames, sourceWeights, clusterSessions and showOR and inRTH and orReadyForState, orHigh, "ORH", 1.70)
+        f_push_level(sourcePrices, sourceNames, sourceWeights, clusterSessions and showOR and inRTH and orReadyForState, orLow, "ORL", 1.70)
+        f_push_level(sourcePrices, sourceNames, sourceWeights, clusterSessions and showIB and inRTH and ibReadyForState, ibHigh, "IBH", 1.90)
+        f_push_level(sourcePrices, sourceNames, sourceWeights, clusterSessions and showIB and inRTH and ibReadyForState, ibLow, "IBL", 1.90)
+        f_push_level(sourcePrices, sourceNames, sourceWeights, clusterSessions and showOvernight and not inOvernight, overnightHigh, "ONH", 1.45)
+        f_push_level(sourcePrices, sourceNames, sourceWeights, clusterSessions and showOvernight and not inOvernight, overnightLow, "ONL", 1.45)
+        f_push_level(sourcePrices, sourceNames, sourceWeights, clusterSessions and showSessionOpens, rthOpen, "RTH Open", 1.15)
+        f_push_level(sourcePrices, sourceNames, sourceWeights, clusterSessions and showSessionOpens, futuresOpen, "Session Open", 1.15)
+
+        // VWAP family.
+        f_push_level(sourcePrices, sourceNames, sourceWeights, clusterVWAP and vwapVisible, customVWAP, "VWAP", 1.35)
+        f_push_level(sourcePrices, sourceNames, sourceWeights, clusterVWAP and vwapVisible and showBand1, vwapUpper1, "VWAP +1", 1.10)
+        f_push_level(sourcePrices, sourceNames, sourceWeights, clusterVWAP and vwapVisible and showBand1, vwapLower1, "VWAP −1", 1.10)
+        f_push_level(sourcePrices, sourceNames, sourceWeights, clusterVWAP and vwapVisible and showBand2, vwapUpper2, "VWAP +2", 0.95)
+        f_push_level(sourcePrices, sourceNames, sourceWeights, clusterVWAP and vwapVisible and showBand2, vwapLower2, "VWAP −2", 0.95)
+        f_push_level(sourcePrices, sourceNames, sourceWeights, clusterVWAP and vwapVisible and showBand3, vwapUpper3, "VWAP +3", 0.80)
+        f_push_level(sourcePrices, sourceNames, sourceWeights, clusterVWAP and vwapVisible and showBand3, vwapLower3, "VWAP −3", 0.80)
+
+        // Visible Fibonacci levels.
+        f_push_level(sourcePrices, sourceNames, sourceWeights, clusterFib and fibReady and showFibRetracements, fibR1, "Fib " + str.tostring(fibRetrace1, "#.###"), 0.70)
+        f_push_level(sourcePrices, sourceNames, sourceWeights, clusterFib and fibReady and showFibRetracements, fibR2, "Fib " + str.tostring(fibRetrace2, "#.###"), 0.75)
+        f_push_level(sourcePrices, sourceNames, sourceWeights, clusterFib and fibReady and showFibRetracements, fibR3, "Fib " + str.tostring(fibRetrace3, "#.###"), 0.70)
+        f_push_level(sourcePrices, sourceNames, sourceWeights, clusterFib and fibReady and showFibExtensions, fibUp1, "Fib " + str.tostring(1.0 + fibProjection1, "#.###"), 0.75)
+        f_push_level(sourcePrices, sourceNames, sourceWeights, clusterFib and fibReady and showFibExtensions, fibUp2, "Fib " + str.tostring(1.0 + fibProjection2, "#.###"), 0.75)
+        f_push_level(sourcePrices, sourceNames, sourceWeights, clusterFib and fibReady and showFibExtensions, fibUp3, "Fib " + str.tostring(1.0 + fibProjection3, "#.###"), 0.75)
+        f_push_level(sourcePrices, sourceNames, sourceWeights, clusterFib and fibReady and showFibExtensions, fibDown1, "Fib " + str.tostring(-fibProjection1, "#.###"), 0.75)
+        f_push_level(sourcePrices, sourceNames, sourceWeights, clusterFib and fibReady and showFibExtensions, fibDown2, "Fib " + str.tostring(-fibProjection2, "#.###"), 0.75)
+        f_push_level(sourcePrices, sourceNames, sourceWeights, clusterFib and fibReady and showFibExtensions, fibDown3, "Fib " + str.tostring(-fibProjection3, "#.###"), 0.75)
+
+        int sourceCount = array.size(sourcePrices)
+        if sourceCount >= clusterMinimum
+            int[] sortedIndices = array.sort_indices(sourcePrices, order.ascending)
+            float tolerance = clusterToleranceMode == "ATR" ? nz(clusterATR) * clusterAtrFactor : clusterTicks * syminfo.mintick
+            tolerance := math.max(tolerance, syminfo.mintick)
+
+            float[] clusterCenters = array.new_float()
+            float[] clusterLows = array.new_float()
+            float[] clusterHighs = array.new_float()
+            float[] clusterScores = array.new_float()
+            int[] clusterCounts = array.new_int()
+            string[] clusterNameLists = array.new_string()
+
+            float workingWeightedSum = na
+            float workingWeight = na
+            float workingLow = na
+            float workingHigh = na
+            int workingCount = 0
+            string workingNames = ""
+
+            for sortedPosition = 0 to sourceCount - 1
+                int sourceIndex = array.get(sortedIndices, sortedPosition)
+                float sourcePrice = array.get(sourcePrices, sourceIndex)
+                float sourceWeight = array.get(sourceWeights, sourceIndex)
+                string sourceName = array.get(sourceNames, sourceIndex)
+
+                if workingCount == 0
+                    workingWeightedSum := sourcePrice * sourceWeight
+                    workingWeight := sourceWeight
+                    workingLow := sourcePrice
+                    workingHigh := sourcePrice
+                    workingCount := 1
+                    workingNames := sourceName
+                else
+                    float workingCenter = workingWeightedSum / workingWeight
+                    if math.abs(sourcePrice - workingCenter) <= tolerance
+                        workingWeightedSum += sourcePrice * sourceWeight
+                        workingWeight += sourceWeight
+                        workingLow := math.min(workingLow, sourcePrice)
+                        workingHigh := math.max(workingHigh, sourcePrice)
+                        workingCount += 1
+                        workingNames := f_append_name(workingNames, sourceName, workingCount)
+                    else
+                        if workingCount >= clusterMinimum
+                            array.push(clusterCenters, workingWeightedSum / workingWeight)
+                            array.push(clusterLows, workingLow)
+                            array.push(clusterHighs, workingHigh)
+                            array.push(clusterScores, workingWeight + workingCount * 0.25)
+                            array.push(clusterCounts, workingCount)
+                            array.push(clusterNameLists, workingNames)
+
+                        workingWeightedSum := sourcePrice * sourceWeight
+                        workingWeight := sourceWeight
+                        workingLow := sourcePrice
+                        workingHigh := sourcePrice
+                        workingCount := 1
+                        workingNames := sourceName
+
+            if workingCount >= clusterMinimum
+                array.push(clusterCenters, workingWeightedSum / workingWeight)
+                array.push(clusterLows, workingLow)
+                array.push(clusterHighs, workingHigh)
+                array.push(clusterScores, workingWeight + workingCount * 0.25)
+                array.push(clusterCounts, workingCount)
+                array.push(clusterNameLists, workingNames)
+
+            int clusterCount = array.size(clusterCenters)
+            if clusterCount > 0
+                int[] rankedClusters = array.sort_indices(clusterScores, order.descending)
+                int numberToDraw = math.min(clusterMaximum, clusterCount)
+                float zonePadding = clusterPaddingTicks * syminfo.mintick
+
+                for rank = 0 to numberToDraw - 1
+                    int clusterIndex = array.get(rankedClusters, rank)
+                    float center = array.get(clusterCenters, clusterIndex)
+                    float zoneLow = array.get(clusterLows, clusterIndex) - zonePadding
+                    float zoneHigh = array.get(clusterHighs, clusterIndex) + zonePadding
+                    float score = array.get(clusterScores, clusterIndex)
+                    int contributors = array.get(clusterCounts, clusterIndex)
+                    string contributorNames = array.get(clusterNameLists, clusterIndex)
+
+                    bool clusterAbove = center > close + tolerance
+                    bool clusterBelow = center < close - tolerance
+                    color directionalColor = clusterAbove ? resistanceColor : clusterBelow ? supportColor : accentColor
+                    int leftX = math.max(0, bar_index - clusterLeftBars)
+                    int rightX = bar_index + clusterRightBars
+
+                    box clusterBox = rank < array.size(clusterBoxes) ? array.get(clusterBoxes, rank) : na
+                    if na(clusterBox)
+                        clusterBox := box.new(
+                             left = leftX, top = zoneHigh, right = rightX, bottom = zoneLow,
+                             xloc = xloc.bar_index,
+                             border_color = color.new(directionalColor, 18),
+                             border_width = 1,
+                             bgcolor = color.new(accentColor, clusterFillOpacity))
+                        array.push(clusterBoxes, clusterBox)
+                    else
+                        box.set_left(clusterBox, leftX)
+                        box.set_top(clusterBox, zoneHigh)
+                        box.set_right(clusterBox, rightX)
+                        box.set_bottom(clusterBox, zoneLow)
+                        box.set_border_color(clusterBox, color.new(directionalColor, 18))
+                        box.set_bgcolor(clusterBox, color.new(accentColor, clusterFillOpacity))
+
+                    string clusterText = "CONFLUENCE ×" + str.tostring(contributors) + "  •  " + str.tostring(center, format.mintick)
+                    clusterText += "\nScore " + str.tostring(score, "#.##")
+                    if showClusterNames
+                        clusterText += "\n" + contributorNames
+
+                    label clusterLabel = rank < array.size(clusterLabels) ? array.get(clusterLabels, rank) : na
+                    if na(clusterLabel)
+                        clusterLabel := label.new(
+                             x = rightX,
+                             y = center,
+                             text = clusterText,
+                             xloc = xloc.bar_index,
+                             style = label.style_label_left,
+                             color = color.new(directionalColor, 70),
+                             textcolor = textColor,
+                             size = size.tiny)
+                        array.push(clusterLabels, clusterLabel)
+                    else
+                        label.set_xy(clusterLabel, rightX, center)
+                        label.set_text(clusterLabel, clusterText)
+                        label.set_color(clusterLabel, color.new(directionalColor, 70))
+                        label.set_textcolor(clusterLabel, textColor)
+
+                    clustersDrawn += 1
+
+    while array.size(clusterBoxes) > clustersDrawn
+        box.delete(array.pop(clusterBoxes))
+    while array.size(clusterLabels) > clustersDrawn
+        label.delete(array.pop(clusterLabels))
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Compact HUD
+// ─────────────────────────────────────────────────────────────────────────────
+var table hud = table.new(
+     f_table_position(hudPosition), 2, 7,
+     bgcolor = showHUD and indicatorEnabled ? color.new(panelColor, 12) : na,
+     frame_color = showHUD and indicatorEnabled ? color.new(accentColor, 35) : na, frame_width = 1,
+     border_color = showHUD and indicatorEnabled ? color.new(neutralColor, 82) : na, border_width = 1)
+
+if barstate.isfirst
+    table.merge_cells(hud, 0, 0, 1, 0)
+
+if barstate.islast
+    string activeSession = inOR ? "Opening Range" : inIB ? "Initial Balance" : inRTH ? "RTH" : inOvernight ? "Overnight" : inFutures ? "Globex" : "Closed"
+    color activeSessionColor = inRTH ? accentColor : inOvernight ? secondaryColor : neutralColor
+    bool timeframeWarning = not timeframe.isintraday or timeframe.in_seconds() > 30 * 60
+    string orText = not na(orHigh) and not na(orLow) ? str.tostring(orHigh - orLow, format.mintick) : "—"
+    string ibText = not na(ibHigh) and not na(ibLow) ? str.tostring(ibHigh - ibLow, format.mintick) : "—"
+    string vwapText = not na(customVWAP) ? str.tostring(customVWAP, format.mintick) : "—"
+    string lastStateText = lastEventName == "None" ? "Waiting" : lastEventName + " · " + lastEventState
+
+    color transparentPanel = showHUD and indicatorEnabled ? color.new(panelColor, 12) : color.new(panelColor, 100)
+    color transparentText = showHUD and indicatorEnabled ? textColor : color.new(textColor, 100)
+    color mutedHudText = showHUD and indicatorEnabled ? color.new(textColor, 25) : color.new(textColor, 100)
+
+    table.cell(hud, 0, 0, "MERIDIAN  —  FUTURES LEVELS", bgcolor = showHUD and indicatorEnabled ? color.new(accentColor, 18) : color.new(accentColor, 100), text_color = transparentText, text_size = f_label_size(hudTextSize))
+    table.cell(hud, 0, 1, "Session", bgcolor = transparentPanel, text_color = mutedHudText, text_size = f_label_size(hudTextSize))
+    table.cell(hud, 1, 1, activeSession, bgcolor = transparentPanel, text_color = showHUD and indicatorEnabled ? activeSessionColor : color.new(activeSessionColor, 100), text_size = f_label_size(hudTextSize))
+    table.cell(hud, 0, 2, "OR range", bgcolor = transparentPanel, text_color = mutedHudText, text_size = f_label_size(hudTextSize))
+    table.cell(hud, 1, 2, orText, bgcolor = transparentPanel, text_color = transparentText, text_size = f_label_size(hudTextSize))
+    table.cell(hud, 0, 3, "IB range", bgcolor = transparentPanel, text_color = mutedHudText, text_size = f_label_size(hudTextSize))
+    table.cell(hud, 1, 3, ibText, bgcolor = transparentPanel, text_color = transparentText, text_size = f_label_size(hudTextSize))
+    table.cell(hud, 0, 4, "VWAP", bgcolor = transparentPanel, text_color = mutedHudText, text_size = f_label_size(hudTextSize))
+    table.cell(hud, 1, 4, vwapText, bgcolor = transparentPanel, text_color = showHUD and indicatorEnabled ? vwapColor : color.new(vwapColor, 100), text_size = f_label_size(hudTextSize))
+    table.cell(hud, 0, 5, "Last state", bgcolor = transparentPanel, text_color = mutedHudText, text_size = f_label_size(hudTextSize))
+    table.cell(hud, 1, 5, lastStateText, bgcolor = transparentPanel, text_color = transparentText, text_size = f_label_size(hudTextSize))
+    table.cell(hud, 0, 6, timeframeWarning ? "Timeframe" : "Mode", bgcolor = transparentPanel, text_color = mutedHudText, text_size = f_label_size(hudTextSize))
+    table.cell(hud, 1, 6, timeframeWarning ? "Use ≤30m; ≤15m preferred" : "Confirmed states", bgcolor = transparentPanel,
+         text_color = showHUD and indicatorEnabled ? (timeframeWarning ? color.orange : supportColor) : color.new(textColor, 100), text_size = f_label_size(hudTextSize))
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Alert conditions (static choices in TradingView's alert dialog)
+// ─────────────────────────────────────────────────────────────────────────────
+alertcondition(stateAcceptedAbove, "Meridian — Level accepted above", "Meridian Futures Levels: price accepted above a tracked level.")
+alertcondition(stateAcceptedBelow, "Meridian — Level accepted below", "Meridian Futures Levels: price accepted below a tracked level.")
+alertcondition(stateRejectedUp, "Meridian — Bullish level rejection", "Meridian Futures Levels: bullish rejection from a tracked level.")
+alertcondition(stateRejectedDown, "Meridian — Bearish level rejection", "Meridian Futures Levels: bearish rejection from a tracked level.")
