@@ -1,0 +1,859 @@
+//@version=6
+indicator(
+     title = "Meridian Trading - Options Levels",
+     shorttitle = "Meridian Options Levels",
+     overlay = true,
+     max_lines_count = 100,
+     max_labels_count = 100,
+     max_boxes_count = 20
+)
+
+// ============================================================================
+// MERIDIAN TRADING - OPTIONS LEVELS
+// Version 0.1.6
+//
+// Designed for intraday analysis of liquid option underlyings such as SPY/QQQ.
+// Best used on standard time-based charts, especially 1m, 2m, 3m, 5m, or 15m.
+//
+// Completed prior-day and prior-week levels do not repaint.
+// Premarket and opening-range levels update while their ranges are forming.
+// All lines, labels, VWAP plots, and boxes use the chart symbol's native price
+// scale. VWAP uses Pine's native daily RTH anchor and resets at each session open.
+// Labels are offset above their lines and staggered at the chart's right edge.
+// ============================================================================
+
+// ─────────────────────────────────────────────────────────────────────────────
+// INPUT GROUPS
+// ─────────────────────────────────────────────────────────────────────────────
+string GROUP_SESSIONS = "01. Sessions"
+string GROUP_LEVELS   = "02. Levels"
+string GROUP_OR       = "03. Opening Range"
+string GROUP_VWAP     = "04. VWAP"
+string GROUP_EMA      = "05. Trend Filters"
+string GROUP_STYLE    = "06. Colours & Style"
+string GROUP_LABELS   = "07. Labels"
+string GROUP_ALERTS   = "08. Alerts"
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SESSION INPUTS
+// ─────────────────────────────────────────────────────────────────────────────
+string sessionTimezone = input.string(
+     "America/New_York",
+     "Session timezone",
+     group = GROUP_SESSIONS,
+     tooltip = "Use America/New_York for SPY, QQQ, and other US-listed underlyings."
+)
+
+string rthInput = input.session(
+     "0930-1600",
+     "Regular session",
+     group = GROUP_SESSIONS
+)
+
+string premarketInput = input.session(
+     "0400-0930",
+     "Premarket session",
+     group = GROUP_SESSIONS
+)
+
+bool weekdaysOnly = input.bool(
+     true,
+     "Monday-Friday only",
+     group = GROUP_SESSIONS
+)
+
+string sessionDays = weekdaysOnly ? ":23456" : ":1234567"
+string rthSession = rthInput + sessionDays
+string premarketSession = premarketInput + sessionDays
+
+bool inRth = not na(time(timeframe.period, rthSession, sessionTimezone))
+bool inPremarket = not na(time(timeframe.period, premarketSession, sessionTimezone))
+
+// A calendar-day key in the selected session timezone. This catches the first
+// visible bar of a new day when extended-hours bars are hidden.
+int calendarDayKey =
+     year(time, sessionTimezone) * 10000 +
+     month(time, sessionTimezone) * 100 +
+     dayofmonth(time, sessionTimezone)
+
+bool newCalendarDay = na(calendarDayKey[1]) or calendarDayKey != calendarDayKey[1]
+
+// `session.isfirstbar_regular` is TradingView's dedicated regular-session
+// boundary and works whether or not extended hours are visible.
+bool rthStart =
+     inRth and (
+         session.isfirstbar_regular or
+         newCalendarDay or
+         not inRth[1]
+     )
+
+bool premarketStart =
+     inPremarket and (
+         newCalendarDay or
+         not inPremarket[1]
+     )
+
+if barstate.isfirst and not timeframe.isintraday
+    runtime.error("Meridian Options Levels is designed for intraday charts.")
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LEVEL TOGGLES
+// ─────────────────────────────────────────────────────────────────────────────
+bool showPriorDay = input.bool(true, "Previous-day high / low", group = GROUP_LEVELS)
+bool showPriorClose = input.bool(true, "Previous-day close", group = GROUP_LEVELS)
+bool showSessionOpen = input.bool(true, "Current regular-session open", group = GROUP_LEVELS)
+bool showPremarket = input.bool(true, "Premarket high / low", group = GROUP_LEVELS)
+bool showPriorWeek = input.bool(true, "Previous-week high / low", group = GROUP_LEVELS)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OPENING RANGE INPUTS
+// ─────────────────────────────────────────────────────────────────────────────
+bool showOpeningRange = input.bool(true, "Show opening range", group = GROUP_OR)
+int openingRangeMinutes = input.int(
+     15,
+     "Opening-range minutes",
+     minval = 1,
+     maxval = 120,
+     group = GROUP_OR,
+     tooltip = "15 minutes is the default. Use 5 minutes for faster event-day execution."
+)
+bool showOpeningRangeBox = input.bool(true, "Shade opening range", group = GROUP_OR)
+int openingRangeTransparency = input.int(
+     87,
+     "Range shading transparency",
+     minval = 0,
+     maxval = 100,
+     group = GROUP_OR
+)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// VWAP INPUTS
+// ─────────────────────────────────────────────────────────────────────────────
+bool showVwap = input.bool(true, "Regular-session VWAP", group = GROUP_VWAP)
+float vwapSource = input.source(hlc3, "VWAP source", group = GROUP_VWAP)
+
+bool showVwapBand1 = input.bool(false, "Show ±1σ band", group = GROUP_VWAP)
+bool showVwapBand2 = input.bool(false, "Show ±2σ band", group = GROUP_VWAP)
+float vwapBand1Multiplier = input.float(1.0, "Band 1 multiplier", minval = 0.1, step = 0.1, group = GROUP_VWAP)
+float vwapBand2Multiplier = input.float(2.0, "Band 2 multiplier", minval = 0.1, step = 0.1, group = GROUP_VWAP)
+int vwapBandTransparency = input.int(92, "Band fill transparency", minval = 0, maxval = 100, group = GROUP_VWAP)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EMA INPUTS
+// ─────────────────────────────────────────────────────────────────────────────
+bool showEmas = input.bool(false, "Show EMA trend filter", group = GROUP_EMA)
+int fastEmaLength = input.int(9, "Fast EMA", minval = 1, group = GROUP_EMA)
+int slowEmaLength = input.int(21, "Slow EMA", minval = 1, group = GROUP_EMA)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COLOUR AND STYLE INPUTS
+// Palette selected for a black TradingView chart with blue/cream candles.
+// ─────────────────────────────────────────────────────────────────────────────
+color priorDayColor = input.color(#F4F4F5, "PDH / PDL", group = GROUP_STYLE)
+color priorCloseColor = input.color(#7DD3FC, "Previous close", group = GROUP_STYLE)
+color sessionOpenColor = input.color(#BAE6FD, "Regular-session open", group = GROUP_STYLE)
+color premarketColor = input.color(#67E8F9, "Premarket high / low", group = GROUP_STYLE)
+color priorWeekColor = input.color(#E5E7EB, "Previous-week high / low", group = GROUP_STYLE)
+color openingRangeColor = input.color(#FBBF24, "Opening range", group = GROUP_STYLE)
+color vwapColor = input.color(#C4B5FD, "VWAP", group = GROUP_STYLE)
+color vwapBandColor = input.color(#A78BFA, "VWAP bands", group = GROUP_STYLE)
+color fastEmaColor = input.color(#38BDF8, "Fast EMA", group = GROUP_STYLE)
+color slowEmaColor = input.color(#FDE68A, "Slow EMA", group = GROUP_STYLE)
+
+int majorLineWidth = input.int(2, "Major level width", minval = 1, maxval = 4, group = GROUP_STYLE)
+int minorLineWidth = input.int(1, "Minor level width", minval = 1, maxval = 4, group = GROUP_STYLE)
+
+string priorDayStyleInput = input.string("Solid", "PDH / PDL style", options = ["Solid", "Dashed", "Dotted"], group = GROUP_STYLE)
+string priorCloseStyleInput = input.string("Dashed", "Previous close style", options = ["Solid", "Dashed", "Dotted"], group = GROUP_STYLE)
+string premarketStyleInput = input.string("Dashed", "Premarket style", options = ["Solid", "Dashed", "Dotted"], group = GROUP_STYLE)
+string priorWeekStyleInput = input.string("Dotted", "Weekly style", options = ["Solid", "Dashed", "Dotted"], group = GROUP_STYLE)
+string openingRangeStyleInput = input.string("Solid", "Opening-range style", options = ["Solid", "Dashed", "Dotted"], group = GROUP_STYLE)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LABEL INPUTS
+// ─────────────────────────────────────────────────────────────────────────────
+bool showLabels = input.bool(true, "Show level labels", group = GROUP_LABELS)
+bool showPricesInLabels = input.bool(true, "Include price in labels", group = GROUP_LABELS)
+string labelSizeInput = input.string(
+     "Tiny",
+     "Label size",
+     options = ["Tiny", "Small", "Normal"],
+     group = GROUP_LABELS
+)
+bool showLabelBackground = input.bool(
+     false,
+     "Show compact label background",
+     group = GROUP_LABELS
+)
+int labelOffsetBars = input.int(
+     3,
+     "Label distance from latest bar",
+     minval = 0,
+     maxval = 50,
+     group = GROUP_LABELS
+)
+bool staggerLabels = input.bool(
+     true,
+     "Stagger nearby labels to the right",
+     group = GROUP_LABELS,
+     tooltip = "Places level families in separate right-side columns so nearby prices do not cover one another."
+)
+int labelStaggerBars = input.int(
+     1,
+     "Horizontal spacing between label columns",
+     minval = 0,
+     maxval = 10,
+     group = GROUP_LABELS
+)
+int labelVerticalOffsetTicks = input.int(
+     2,
+     "Label height above line (ticks)",
+     minval = 0,
+     maxval = 100,
+     group = GROUP_LABELS,
+     tooltip = "Moves only the text above the level. The horizontal line remains at the exact level price."
+)
+int labelTransparency = input.int(78, "Label background transparency", minval = 0, maxval = 100, group = GROUP_LABELS)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ALERT INPUTS
+// ─────────────────────────────────────────────────────────────────────────────
+bool enableAlerts = input.bool(true, "Enable alert conditions", group = GROUP_ALERTS)
+bool enableVwapRejectionAlerts = input.bool(false, "Enable VWAP rejection alerts", group = GROUP_ALERTS)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HELPER FUNCTIONS
+// ─────────────────────────────────────────────────────────────────────────────
+f_lineStyle(string styleText) =>
+    styleText == "Dashed" ? line.style_dashed :
+     styleText == "Dotted" ? line.style_dotted :
+     line.style_solid
+
+f_levelText(string levelName, float levelPrice) =>
+    showPricesInLabels ? levelName + "  " + str.tostring(levelPrice, format.mintick) : levelName
+
+f_labelSize(string sizeText) =>
+    sizeText == "Normal" ? size.normal :
+     sizeText == "Small" ? size.small :
+     size.tiny
+
+f_labelStyle() =>
+    showLabelBackground ? label.style_label_left : label.style_none
+
+f_labelY(float levelPrice) =>
+    levelPrice + syminfo.mintick * labelVerticalOffsetTicks
+
+f_newLine(int startTime, float levelPrice, color levelColor, int width, string styleText) =>
+    line.new(
+         x1 = startTime,
+         y1 = levelPrice,
+         x2 = time_close,
+         y2 = levelPrice,
+         xloc = xloc.bar_time,
+         extend = extend.right,
+         color = levelColor,
+         style = f_lineStyle(styleText),
+         width = width
+    )
+
+f_newLabel(float levelPrice, string levelName, color levelColor) =>
+    label.new(
+         x = bar_index,
+         y = f_labelY(levelPrice),
+         text = f_levelText(levelName, levelPrice),
+         xloc = xloc.bar_index,
+         yloc = yloc.price,
+         style = f_labelStyle(),
+         color = showLabelBackground ? color.new(color.black, labelTransparency) : na,
+         textcolor = levelColor,
+         size = f_labelSize(labelSizeInput)
+    )
+
+f_labelX(int columnSlot) =>
+    int extraBars = staggerLabels ? columnSlot * labelStaggerBars : 0
+    bar_index + labelOffsetBars + extraBars
+
+f_updateLabel(label labelId, int labelX, float levelPrice, string levelName, color levelColor) =>
+    if not na(labelId) and not na(levelPrice)
+        label.set_x(labelId, labelX)
+        label.set_y(labelId, f_labelY(levelPrice))
+        label.set_text(labelId, f_levelText(levelName, levelPrice))
+        label.set_style(labelId, f_labelStyle())
+        label.set_color(labelId, showLabelBackground ? color.new(color.black, labelTransparency) : na)
+        label.set_textcolor(labelId, levelColor)
+        label.set_size(labelId, f_labelSize(labelSizeInput))
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DRAWING OBJECTS
+// ─────────────────────────────────────────────────────────────────────────────
+var line pdhLine = na
+var line pdlLine = na
+var line pdcLine = na
+var line sessionOpenLine = na
+var line pmhLine = na
+var line pmlLine = na
+var line pwhLine = na
+var line pwlLine = na
+var line orhLine = na
+var line orlLine = na
+
+var label pdhLabel = na
+var label pdlLabel = na
+var label pdcLabel = na
+var label sessionOpenLabel = na
+var label pmhLabel = na
+var label pmlLabel = na
+var label pwhLabel = na
+var label pwlLabel = na
+var label orhLabel = na
+var label orlLabel = na
+
+var box openingRangeBox = na
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CURRENT AND PREVIOUS DAY TRACKING
+// Uses regular-session bars only and preserves the exact bar time where each
+// high, low, and close occurred. The completed prior day becomes available at
+// the next premarket open, or at the next RTH open if extended hours are hidden.
+// ─────────────────────────────────────────────────────────────────────────────
+var float currentDayHigh = na
+var float currentDayLow = na
+var float currentDayClose = na
+
+var int currentDayHighTime = na
+var int currentDayLowTime = na
+var int currentDayCloseTime = na
+
+var float previousDayHigh = na
+var float previousDayLow = na
+var float previousDayClose = na
+
+var int previousDayHighTime = na
+var int previousDayLowTime = na
+var int previousDayCloseTime = na
+
+var float currentSessionOpen = na
+
+bool dailyLevelRoll = premarketStart or (rthStart and not inPremarket[1])
+
+if dailyLevelRoll
+    // Finalize the completed prior regular session.
+    if not na(currentDayHigh)
+        previousDayHigh := currentDayHigh
+        previousDayLow := currentDayLow
+        previousDayClose := currentDayClose
+
+        previousDayHighTime := currentDayHighTime
+        previousDayLowTime := currentDayLowTime
+        previousDayCloseTime := currentDayCloseTime
+
+    // Delete the previously displayed prior-day levels.
+    if not na(pdhLine)
+        line.delete(pdhLine)
+    if not na(pdlLine)
+        line.delete(pdlLine)
+    if not na(pdcLine)
+        line.delete(pdcLine)
+
+    if not na(pdhLabel)
+        label.delete(pdhLabel)
+    if not na(pdlLabel)
+        label.delete(pdlLabel)
+    if not na(pdcLabel)
+        label.delete(pdcLabel)
+
+    pdhLine := na
+    pdlLine := na
+    pdcLine := na
+
+    pdhLabel := na
+    pdlLabel := na
+    pdcLabel := na
+
+    // Remove the prior session's open during the new premarket.
+    if not na(sessionOpenLine)
+        line.delete(sessionOpenLine)
+    if not na(sessionOpenLabel)
+        label.delete(sessionOpenLabel)
+
+    sessionOpenLine := na
+    sessionOpenLabel := na
+    currentSessionOpen := na
+
+    // Draw the completed prior-day levels from their originating bars.
+    // Y values are absolute prices on the underlying symbol's native scale.
+    if showPriorDay and not na(previousDayHigh)
+        pdhLine := f_newLine(previousDayHighTime, previousDayHigh, priorDayColor, majorLineWidth, priorDayStyleInput)
+        pdlLine := f_newLine(previousDayLowTime, previousDayLow, priorDayColor, majorLineWidth, priorDayStyleInput)
+
+        if showLabels
+            pdhLabel := f_newLabel(previousDayHigh, "PDH", priorDayColor)
+            pdlLabel := f_newLabel(previousDayLow, "PDL", priorDayColor)
+
+    if showPriorClose and not na(previousDayClose)
+        pdcLine := f_newLine(previousDayCloseTime, previousDayClose, priorCloseColor, minorLineWidth, priorCloseStyleInput)
+
+        if showLabels
+            pdcLabel := f_newLabel(previousDayClose, "PDC", priorCloseColor)
+
+    // Clear the completed session so it is not finalized twice.
+    currentDayHigh := na
+    currentDayLow := na
+    currentDayClose := na
+    currentDayHighTime := na
+    currentDayLowTime := na
+    currentDayCloseTime := na
+
+if rthStart
+    // Replace yesterday's RTH-open line with today's open.
+    if not na(sessionOpenLine)
+        line.delete(sessionOpenLine)
+    if not na(sessionOpenLabel)
+        label.delete(sessionOpenLabel)
+
+    sessionOpenLine := na
+    sessionOpenLabel := na
+    currentSessionOpen := open
+
+    if showSessionOpen
+        sessionOpenLine := f_newLine(time, currentSessionOpen, sessionOpenColor, minorLineWidth, "Solid")
+
+        if showLabels
+            sessionOpenLabel := f_newLabel(currentSessionOpen, "RTH OPEN", sessionOpenColor)
+
+    // Begin tracking the new regular session.
+    currentDayHigh := high
+    currentDayLow := low
+    currentDayClose := close
+
+    currentDayHighTime := time
+    currentDayLowTime := time
+    currentDayCloseTime := time
+
+else if inRth
+    if na(currentDayHigh) or high > currentDayHigh
+        currentDayHigh := high
+        currentDayHighTime := time
+
+    if na(currentDayLow) or low < currentDayLow
+        currentDayLow := low
+        currentDayLowTime := time
+
+    currentDayClose := close
+    currentDayCloseTime := time
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PREVIOUS WEEK TRACKING
+// Tracks regular-session highs/lows and publishes the completed week as soon as
+// the next calendar week begins, including Monday premarket.
+// ─────────────────────────────────────────────────────────────────────────────
+int currentWeekKey = time("1W")
+
+var int trackedWeekKey = na
+var float currentWeekHigh = na
+var float currentWeekLow = na
+var int currentWeekHighTime = na
+var int currentWeekLowTime = na
+
+var float previousWeekHigh = na
+var float previousWeekLow = na
+var int previousWeekHighTime = na
+var int previousWeekLowTime = na
+
+if na(trackedWeekKey)
+    trackedWeekKey := currentWeekKey
+
+bool weekChanged = not na(trackedWeekKey) and currentWeekKey != trackedWeekKey
+
+if weekChanged
+    if not na(currentWeekHigh)
+        previousWeekHigh := currentWeekHigh
+        previousWeekLow := currentWeekLow
+        previousWeekHighTime := currentWeekHighTime
+        previousWeekLowTime := currentWeekLowTime
+
+    if not na(pwhLine)
+        line.delete(pwhLine)
+    if not na(pwlLine)
+        line.delete(pwlLine)
+    if not na(pwhLabel)
+        label.delete(pwhLabel)
+    if not na(pwlLabel)
+        label.delete(pwlLabel)
+
+    pwhLine := na
+    pwlLine := na
+    pwhLabel := na
+    pwlLabel := na
+
+    if showPriorWeek and not na(previousWeekHigh)
+        pwhLine := f_newLine(previousWeekHighTime, previousWeekHigh, priorWeekColor, majorLineWidth, priorWeekStyleInput)
+        pwlLine := f_newLine(previousWeekLowTime, previousWeekLow, priorWeekColor, majorLineWidth, priorWeekStyleInput)
+
+        if showLabels
+            pwhLabel := f_newLabel(previousWeekHigh, "PWH", priorWeekColor)
+            pwlLabel := f_newLabel(previousWeekLow, "PWL", priorWeekColor)
+
+    trackedWeekKey := currentWeekKey
+    currentWeekHigh := na
+    currentWeekLow := na
+    currentWeekHighTime := na
+    currentWeekLowTime := na
+
+if inRth
+    if na(currentWeekHigh)
+        currentWeekHigh := high
+        currentWeekLow := low
+        currentWeekHighTime := time
+        currentWeekLowTime := time
+    else
+        if high > currentWeekHigh
+            currentWeekHigh := high
+            currentWeekHighTime := time
+
+        if low < currentWeekLow
+            currentWeekLow := low
+            currentWeekLowTime := time
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PREMARKET HIGH / LOW
+// These levels move only while premarket is forming, then remain fixed through
+// the regular session. Extended-hours bars must be enabled on the chart.
+// ─────────────────────────────────────────────────────────────────────────────
+var float premarketHigh = na
+var float premarketLow = na
+var int premarketHighTime = na
+var int premarketLowTime = na
+
+if premarketStart
+    if not na(pmhLine)
+        line.delete(pmhLine)
+    if not na(pmlLine)
+        line.delete(pmlLine)
+    if not na(pmhLabel)
+        label.delete(pmhLabel)
+    if not na(pmlLabel)
+        label.delete(pmlLabel)
+
+    pmhLine := na
+    pmlLine := na
+    pmhLabel := na
+    pmlLabel := na
+
+    premarketHigh := high
+    premarketLow := low
+    premarketHighTime := time
+    premarketLowTime := time
+
+    if showPremarket
+        pmhLine := f_newLine(premarketHighTime, premarketHigh, premarketColor, minorLineWidth, premarketStyleInput)
+        pmlLine := f_newLine(premarketLowTime, premarketLow, premarketColor, minorLineWidth, premarketStyleInput)
+
+        if showLabels
+            pmhLabel := f_newLabel(premarketHigh, "PMH", premarketColor)
+            pmlLabel := f_newLabel(premarketLow, "PML", premarketColor)
+
+else if inPremarket
+    bool newPremarketHigh = na(premarketHigh) or high > premarketHigh
+    bool newPremarketLow = na(premarketLow) or low < premarketLow
+
+    if newPremarketHigh
+        premarketHigh := high
+        premarketHighTime := time
+
+        if showPremarket and not na(pmhLine)
+            line.set_xy1(pmhLine, premarketHighTime, premarketHigh)
+            line.set_xy2(pmhLine, time_close, premarketHigh)
+
+    if newPremarketLow
+        premarketLow := low
+        premarketLowTime := time
+
+        if showPremarket and not na(pmlLine)
+            line.set_xy1(pmlLine, premarketLowTime, premarketLow)
+            line.set_xy2(pmlLine, time_close, premarketLow)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OPENING RANGE
+// Lines begin at the exact bar that established the OR high/low.
+// The box shows only the actual opening-range time window.
+// ─────────────────────────────────────────────────────────────────────────────
+var int openingRangeStartTime = na
+var int openingRangeEndTime = na
+var float openingRangeHigh = na
+var float openingRangeLow = na
+var int openingRangeHighTime = na
+var int openingRangeLowTime = na
+var bool openingRangeFinalized = false
+
+if rthStart
+    if not na(orhLine)
+        line.delete(orhLine)
+    if not na(orlLine)
+        line.delete(orlLine)
+    if not na(orhLabel)
+        label.delete(orhLabel)
+    if not na(orlLabel)
+        label.delete(orlLabel)
+    if not na(openingRangeBox)
+        box.delete(openingRangeBox)
+
+    orhLine := na
+    orlLine := na
+    orhLabel := na
+    orlLabel := na
+    openingRangeBox := na
+
+    openingRangeStartTime := time
+    openingRangeEndTime := time + openingRangeMinutes * 60 * 1000
+    openingRangeHigh := high
+    openingRangeLow := low
+    openingRangeHighTime := time
+    openingRangeLowTime := time
+    openingRangeFinalized := false
+
+    if showOpeningRange
+        orhLine := f_newLine(openingRangeHighTime, openingRangeHigh, openingRangeColor, majorLineWidth, openingRangeStyleInput)
+        orlLine := f_newLine(openingRangeLowTime, openingRangeLow, openingRangeColor, majorLineWidth, openingRangeStyleInput)
+
+        if showLabels
+            orhLabel := f_newLabel(openingRangeHigh, "ORH", openingRangeColor)
+            orlLabel := f_newLabel(openingRangeLow, "ORL", openingRangeColor)
+
+        if showOpeningRangeBox
+            openingRangeBox := box.new(
+                 left = openingRangeStartTime,
+                 top = openingRangeHigh,
+                 right = time_close,
+                 bottom = openingRangeLow,
+                 xloc = xloc.bar_time,
+                 border_color = color.new(openingRangeColor, 15),
+                 border_width = 1,
+                 bgcolor = color.new(openingRangeColor, openingRangeTransparency)
+            )
+
+bool inOpeningRange = inRth and not na(openingRangeEndTime) and time < openingRangeEndTime
+
+if inOpeningRange and not rthStart
+    bool newOpeningRangeHigh = high > openingRangeHigh
+    bool newOpeningRangeLow = low < openingRangeLow
+
+    if newOpeningRangeHigh
+        openingRangeHigh := high
+        openingRangeHighTime := time
+
+        if showOpeningRange and not na(orhLine)
+            line.set_xy1(orhLine, openingRangeHighTime, openingRangeHigh)
+            line.set_xy2(orhLine, time_close, openingRangeHigh)
+
+    if newOpeningRangeLow
+        openingRangeLow := low
+        openingRangeLowTime := time
+
+        if showOpeningRange and not na(orlLine)
+            line.set_xy1(orlLine, openingRangeLowTime, openingRangeLow)
+            line.set_xy2(orlLine, time_close, openingRangeLow)
+
+    if showOpeningRangeBox and not na(openingRangeBox)
+        box.set_top(openingRangeBox, openingRangeHigh)
+        box.set_bottom(openingRangeBox, openingRangeLow)
+        box.set_right(openingRangeBox, math.min(time_close, openingRangeEndTime))
+
+if inRth and not inOpeningRange and not openingRangeFinalized and not na(openingRangeEndTime)
+    if showOpeningRangeBox and not na(openingRangeBox)
+        box.set_right(openingRangeBox, openingRangeEndTime)
+
+    openingRangeFinalized := true
+
+// ─────────────────────────────────────────────────────────────────────────────
+// REGULAR-SESSION VWAP
+// Uses Pine's native anchored VWAP. `rthStart` is true on the first regular-
+// session bar of every trading day, so the VWAP and deviation bands reset daily.
+// Premarket and overnight values are hidden and do not affect the displayed RTH
+// VWAP after the new daily anchor fires.
+// ─────────────────────────────────────────────────────────────────────────────
+bool dailyVwapAnchor = rthStart
+
+float sessionVwap = ta.vwap(vwapSource, dailyVwapAnchor)
+[_, upperBand1, lowerBand1] = ta.vwap(
+     vwapSource,
+     dailyVwapAnchor,
+     vwapBand1Multiplier
+)
+[_, upperBand2, lowerBand2] = ta.vwap(
+     vwapSource,
+     dailyVwapAnchor,
+     vwapBand2Multiplier
+)
+
+// Suppress the first plotted point of each session so regular-hours-only charts
+// do not draw a diagonal connector from yesterday's VWAP to today's reset.
+bool showCurrentVwapBar = inRth and not rthStart
+
+vwapPlot = plot(
+     showVwap and showCurrentVwapBar ? sessionVwap : na,
+     title = "Daily RTH VWAP",
+     color = vwapColor,
+     linewidth = 2,
+     style = plot.style_linebr
+)
+
+upperBand1Plot = plot(
+     showVwap and showVwapBand1 and showCurrentVwapBar ? upperBand1 : na,
+     title = "VWAP +1σ",
+     color = color.new(vwapBandColor, 20),
+     linewidth = 1,
+     style = plot.style_linebr
+)
+
+lowerBand1Plot = plot(
+     showVwap and showVwapBand1 and showCurrentVwapBar ? lowerBand1 : na,
+     title = "VWAP -1σ",
+     color = color.new(vwapBandColor, 20),
+     linewidth = 1,
+     style = plot.style_linebr
+)
+
+upperBand2Plot = plot(
+     showVwap and showVwapBand2 and showCurrentVwapBar ? upperBand2 : na,
+     title = "VWAP +2σ",
+     color = color.new(vwapBandColor, 50),
+     linewidth = 1,
+     style = plot.style_linebr
+)
+
+lowerBand2Plot = plot(
+     showVwap and showVwapBand2 and showCurrentVwapBar ? lowerBand2 : na,
+     title = "VWAP -2σ",
+     color = color.new(vwapBandColor, 50),
+     linewidth = 1,
+     style = plot.style_linebr
+)
+
+fill(
+     upperBand1Plot,
+     lowerBand1Plot,
+     color = showVwap and showVwapBand1 ? color.new(vwapBandColor, vwapBandTransparency) : na,
+     title = "VWAP Band 1 Fill"
+)
+
+fill(
+     upperBand2Plot,
+     lowerBand2Plot,
+     color = showVwap and showVwapBand2 ? color.new(vwapBandColor, vwapBandTransparency) : na,
+     title = "VWAP Band 2 Fill"
+)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OPTIONAL EMA TREND FILTER
+// ─────────────────────────────────────────────────────────────────────────────
+float fastEma = ta.ema(close, fastEmaLength)
+float slowEma = ta.ema(close, slowEmaLength)
+
+plot(
+     showEmas ? fastEma : na,
+     title = "Fast EMA",
+     color = fastEmaColor,
+     linewidth = 1
+)
+
+plot(
+     showEmas ? slowEma : na,
+     title = "Slow EMA",
+     color = slowEmaColor,
+     linewidth = 1
+)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RIGHT-EDGE LABEL POSITIONING
+// ─────────────────────────────────────────────────────────────────────────────
+if barstate.islast and showLabels
+    // Daily high/low share a column because they are normally well separated.
+    f_updateLabel(pdhLabel, f_labelX(0), previousDayHigh, "PDH", priorDayColor)
+    f_updateLabel(pdlLabel, f_labelX(0), previousDayLow, "PDL", priorDayColor)
+
+    // Levels that commonly cluster around the current session receive their
+    // own columns farther to the right.
+    f_updateLabel(pdcLabel, f_labelX(1), previousDayClose, "PDC", priorCloseColor)
+    f_updateLabel(sessionOpenLabel, f_labelX(2), currentSessionOpen, "RTH OPEN", sessionOpenColor)
+
+    f_updateLabel(pmhLabel, f_labelX(3), premarketHigh, "PMH", premarketColor)
+    f_updateLabel(pmlLabel, f_labelX(4), premarketLow, "PML", premarketColor)
+
+    // Weekly high/low share a separate column.
+    f_updateLabel(pwhLabel, f_labelX(5), previousWeekHigh, "PWH", priorWeekColor)
+    f_updateLabel(pwlLabel, f_labelX(5), previousWeekLow, "PWL", priorWeekColor)
+
+    // Opening-range levels are often close to the open and premarket levels,
+    // so each receives a distinct right-side column.
+    f_updateLabel(orhLabel, f_labelX(6), openingRangeHigh, "ORH", openingRangeColor)
+    f_updateLabel(orlLabel, f_labelX(7), openingRangeLow, "ORL", openingRangeColor)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ALERT CONDITIONS
+// Alerts are close-confirmed to reduce noise from brief wick-throughs.
+// ─────────────────────────────────────────────────────────────────────────────
+bool rawPdhBreak = ta.crossover(close, previousDayHigh)
+bool rawPdlBreak = ta.crossunder(close, previousDayLow)
+
+bool rawPmhBreak = ta.crossover(close, premarketHigh)
+bool rawPmlBreak = ta.crossunder(close, premarketLow)
+
+bool rawPwhBreak = ta.crossover(close, previousWeekHigh)
+bool rawPwlBreak = ta.crossunder(close, previousWeekLow)
+
+bool rawOrhBreak = ta.crossover(close, openingRangeHigh)
+bool rawOrlBreak = ta.crossunder(close, openingRangeLow)
+
+bool rawVwapReclaim = ta.crossover(close, sessionVwap)
+bool rawVwapLoss = ta.crossunder(close, sessionVwap)
+
+bool bullishVwapRejection =
+     inRth and
+     not na(sessionVwap) and
+     low <= sessionVwap and
+     close > sessionVwap and
+     close > open
+
+bool bearishVwapRejection =
+     inRth and
+     not na(sessionVwap) and
+     high >= sessionVwap and
+     close < sessionVwap and
+     close < open
+
+bool pdhBreak = enableAlerts and not na(previousDayHigh) and rawPdhBreak
+bool pdlBreak = enableAlerts and not na(previousDayLow) and rawPdlBreak
+
+bool pmhBreak = enableAlerts and not na(premarketHigh) and rawPmhBreak
+bool pmlBreak = enableAlerts and not na(premarketLow) and rawPmlBreak
+
+bool pwhBreak = enableAlerts and not na(previousWeekHigh) and rawPwhBreak
+bool pwlBreak = enableAlerts and not na(previousWeekLow) and rawPwlBreak
+
+bool orhBreak = enableAlerts and openingRangeFinalized and rawOrhBreak
+bool orlBreak = enableAlerts and openingRangeFinalized and rawOrlBreak
+
+bool vwapReclaim = enableAlerts and inRth and rawVwapReclaim
+bool vwapLoss = enableAlerts and inRth and rawVwapLoss
+
+bool bullishVwapRejectionAlert = enableAlerts and enableVwapRejectionAlerts and bullishVwapRejection
+bool bearishVwapRejectionAlert = enableAlerts and enableVwapRejectionAlerts and bearishVwapRejection
+
+alertcondition(pdhBreak, "PDH Break", "{{ticker}} closed above the previous-day high at {{close}}.")
+alertcondition(pdlBreak, "PDL Break", "{{ticker}} closed below the previous-day low at {{close}}.")
+
+alertcondition(pmhBreak, "Premarket High Break", "{{ticker}} closed above the premarket high at {{close}}.")
+alertcondition(pmlBreak, "Premarket Low Break", "{{ticker}} closed below the premarket low at {{close}}.")
+
+alertcondition(pwhBreak, "Previous-Week High Break", "{{ticker}} closed above the previous-week high at {{close}}.")
+alertcondition(pwlBreak, "Previous-Week Low Break", "{{ticker}} closed below the previous-week low at {{close}}.")
+
+alertcondition(orhBreak, "Opening-Range Breakout", "{{ticker}} closed above the opening-range high at {{close}}.")
+alertcondition(orlBreak, "Opening-Range Breakdown", "{{ticker}} closed below the opening-range low at {{close}}.")
+
+alertcondition(vwapReclaim, "VWAP Reclaim", "{{ticker}} reclaimed regular-session VWAP at {{close}}.")
+alertcondition(vwapLoss, "VWAP Loss", "{{ticker}} lost regular-session VWAP at {{close}}.")
+
+alertcondition(bullishVwapRejectionAlert, "Bullish VWAP Rejection", "{{ticker}} tested VWAP and closed back above it at {{close}}.")
+alertcondition(bearishVwapRejectionAlert, "Bearish VWAP Rejection", "{{ticker}} tested VWAP and closed back below it at {{close}}.")
