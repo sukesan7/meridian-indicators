@@ -1,0 +1,23 @@
+# OS/editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Temporary files
+*.tmp
+*.bak
+*.log
+
+# Archives / exports
+*.zip
+*.rar
+*.7z
+
+# Secrets / local config
+.env
+.env.*
+secrets/
+private/
+paid/
+invite-only/
