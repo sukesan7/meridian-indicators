@@ -24,7 +24,7 @@
 - **Context** describes the current market environment, participation, momentum, and trend quality.
 - **Profile** describes where the futures auction is accepting value and how that value is changing.
 
-The scripts are written in Pine Script v6, remain fully inspectable, and are intended to be useful without requiring hidden calculations or unexplained signal labels. They are analytical tools—not automated trade recommendations.
+The scripts are written in Pine Script v6, remain fully inspectable, and are intended to be useful without requiring hidden calculations or unexplained signal labels. They are analytical tools, not automated trade recommendations.
 
 ## Indicator Suite
 
