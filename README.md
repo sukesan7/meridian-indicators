@@ -23,9 +23,9 @@
 - **Levels** identifies important session, historical, volatility and confluence references.
 - **Context** describes participation, momentum, volatility, relative strength and market regime.
 - **Profile** shows where the futures auction accepts value and how that value changes.
-- **Setups** converts confirmed liquidity, structure, zone and strategy conditions into temporary trade hypotheses.
+- **Setups** ranks multi-timeframe market confluence and produces a temporary trade hypothesis only after the complete qualification model passes.
 
-The scripts are written in Pine Script v6 and remain fully inspectable. Each indicator documents its calculations, limits and intended use. Meridian indicators are analytical tools. They do not place broker orders and do not provide guaranteed trade outcomes.
+The scripts are written in Pine Script v6 and remain fully inspectable. Each indicator documents its calculations, limits and intended use. Meridian indicators are analytical tools. They do not place broker orders and do not guarantee a trade outcome.
 
 ## Indicator Suite
 
@@ -36,7 +36,7 @@ The scripts are written in Pine Script v6 and remain fully inspectable. Each ind
 | **Meridian — Futures Levels** | NQ, ES, MNQ, MES and related futures | Overlay | Session structure, OR, IB, custom VWAP bands, references, projections, clusters and level states | Stable development release | [Read docs](./docs/meridian-futures-levels.md) | [View Pine](./indicators/futures/meridian-futures-levels/meridian-futures-levels.pine) |
 | **Meridian — Futures Context** | NQ, ES, MNQ and MES | Lower pane | Same-time participation, realized volatility, regime, EMA/ADX structure and relative strength | Stable development release | [Read docs](./docs/meridian-futures-context.md) | [View Pine](./indicators/futures/meridian-futures-context/meridian-futures-context-v0.1.6.pine) |
 | **Meridian — Futures Profile** | NQ, ES, MNQ and MES | Overlay | Current/previous TPO profiles, value area, profile structure and Auction Market Theory context | Active development | [Read docs](./docs/meridian-futures-profile.md) | [View Pine](./indicators/futures/meridian-futures-profile/meridian-futures-profile-v0.1.1.pine) |
-| **Meridian — Futures Setups** | NQ, ES, MNQ and MES | Overlay | Stateful liquidity, structure, FVG/IFVG/OB/BB, SMT, scoring and risk/reward setup management | **Beta · Work in progress** | [Read docs](./docs/meridian-futures-setups.md) | [View Pine](./indicators/futures/meridian-futures-setups/meridian-futures-setups-v0.2.pine) |
+| **Meridian — Futures Setups** | NQ, ES, MNQ and MES | Overlay | Strategy-neutral Meridian Choice scanner for multi-timeframe zones, structure, liquidity, context and confirmed trade hypotheses | **Beta · Work in progress** | [Read docs](./docs/meridian-futures-setups.md) | [Daily build](./indicators/futures/meridian-futures-setups/meridian-futures-setups-v0.3.0-beta.pine)<br>[Research build](./indicators/futures/meridian-futures-setups/meridian-futures-setups-research-v0.3.0-beta.pine) |
 
 ## Screenshots
 
@@ -74,12 +74,10 @@ The scripts are written in Pine Script v6 and remain fully inspectable. Each ind
     <td width="50%" valign="top">
       <a href="./docs/meridian-futures-setups.md"><img src="./screenshots/Meridian_Futures_Setups.png" alt="Meridian Futures Setups beta preview"></a>
       <br><b>Futures Setups — Beta</b><br>
-      Confirmed setup detection, confluence scoring and temporary risk/reward trade hypotheses.
+      Multi-timeframe confluence scoring with separate daily-use and research builds.
     </td>
   </tr>
 </table>
-
-> **Screenshot note:** `Meridian_Futures_Setups.png` is reserved for the Futures Setups preview. Add the image to `screenshots/` when the beta visual design is finalized.
 
 ## Quick Start
 
@@ -97,8 +95,6 @@ The scripts are written in Pine Script v6 and remain fully inspectable. Each ind
 
 Use GitHub's **Code** menu to clone the repository or download it as a ZIP. Indicator source files are stored under `indicators/`. Documentation and screenshots are stored under `docs/` and `screenshots/`.
 
-Clone with Git:
-
 ```bash
 git clone https://github.com/YOUR_USERNAME/meridian-indicators.git
 cd meridian-indicators
@@ -108,7 +104,7 @@ Replace `YOUR_USERNAME` with the repository owner before publishing this command
 
 ### Update an installed script
 
-TradingView does not automatically update source code copied from GitHub.
+TradingView does not automatically update source copied from GitHub.
 
 1. Open the latest source file in this repository.
 2. Review the commit history and changelog.
@@ -137,16 +133,25 @@ Git commit history and source diffs make each public change reviewable.
 
 ### Futures Setups beta
 
-- Primary timeframe: **1 minute**.
-- Supported working timeframes: 1, 3, 5 and 15 minutes.
-- Recommended markets: NQ, MNQ, ES and MES.
-- Recommended session: extended hours.
-- Recommended initial mode: `Meridian Choice` with the `Balanced` scoring profile.
-- Use `Minimal` or `Signals` display mode for normal chart use.
-- Use `Research` mode only for diagnostics because it intentionally shows more internal state.
-- Treat all setup markers as rule-based hypotheses, not broker orders or guaranteed entries.
+Use the **daily build** for normal chart use and the **research build** only when you need scoring diagnostics.
 
-Futures Setups is a **beta and work in progress**. Its thresholds, named strategy definitions, stop limits and visual lifecycle can change during validation.
+Recommended initial configuration:
+
+```text
+Market: NQ or ES
+Timeframe: 1 minute
+Extended hours: enabled
+Signal window: 08:00–16:00 ET
+Minimum score: 80
+Minimum independent categories: 4
+Entry mode: Rejection close
+Require first qualified touch: enabled
+Maximum active trades: 1
+```
+
+The zone engine reads the configured futures session, including overnight and premarket bars. The default signal window begins at 08:00 New York time and can be changed in the settings.
+
+Futures Setups is a **beta and work in progress**. Score weights, zone rules, thresholds and lifecycle behavior can change during validation.
 
 ## Suggested Workflows
 
@@ -169,14 +174,16 @@ The Profile dashboard includes a layout option intended to stack with the Future
 
 ### Futures setup workflow
 
-Add **Futures Setups** when you want the suite to convert confirmed market evidence into temporary setup hypotheses.
+Use **Futures Setups Daily** when you want a clean Meridian Choice signal scanner.
 
-- Levels supplies objective liquidity and session references.
-- Context supplies participation, volatility and regime information.
-- Profile supplies value and auction-location context.
-- Setups independently registers the evidence that it requires, applies mandatory gates and confluence scoring, and shows only qualified setup zones or triggered trades according to the selected display mode.
+- The script detects chart, 5-minute, 15-minute, 30-minute, 1-hour and 4-hour FVG, IFVG, OB and BB zones.
+- It evaluates nesting, structure, displacement, liquidity, VWAP, momentum, RVOL, SMT and session context.
+- It selects the strongest qualified zone on each confirmed bar.
+- It produces full BUY/SELL trade geometry only after the live score and lifecycle gates pass.
 
-Futures Setups does not directly read the internal object state of the other indicators. It recalculates the required data so that it can operate as a standalone public script.
+Use **Futures Setups Research** to inspect active zones, score composition, rejected candidates and score-bucket outcomes. Research visibility does not lower the live threshold and does not convert rejected candidates into trades.
+
+Futures Setups recalculates the information that it requires. It does not directly read the internal object state of Futures Levels, Context or Profile.
 
 ## Repository Layout
 
@@ -201,6 +208,8 @@ meridian-indicators/
 │       ├── meridian-futures-context/
 │       ├── meridian-futures-profile/
 │       └── meridian-futures-setups/
+│           ├── meridian-futures-setups-v0.3.0-beta.pine
+│           └── meridian-futures-setups-research-v0.3.0-beta.pine
 └── screenshots/
     ├── Meridian_Options_Levels.png
     ├── Meridian_Options_Context.png
@@ -214,11 +223,13 @@ meridian-indicators/
 
 - **Transparent:** source code and calculation logic are public.
 - **Explainable:** classifications and setup states use documented rules rather than unexplained labels.
+- **Focused:** each indicator has one primary analytical purpose.
 - **Session-aware:** intraday calculations use explicit market-session boundaries.
 - **Confirmed where required:** completed higher-timeframe values and confirmed pivots are used on critical setup paths.
 - **Stateful:** zones, levels and setup hypotheses progress through explicit lifecycles.
-- **Customizable:** sessions, thresholds, visual styles, strategies and display density are configurable.
-- **Composable:** each indicator has a focused role and can be used independently or with the Meridian suite.
+- **Strategy-neutral:** Futures Setups ranks shared market evidence instead of embedding multiple named playbooks.
+- **Customizable:** sessions, thresholds, visual styles and display density are configurable.
+- **Composable:** each indicator can be used independently or with the Meridian suite.
 - **Bounded:** drawing objects and retained history are limited to respect Pine Script resource constraints.
 
 ## Documentation
@@ -236,9 +247,14 @@ The [documentation index](./docs/README.md) provides a compact list of all indic
 
 ## Development Status
 
-The repository is under active development. Public scripts can receive calculation fixes, usability improvements, new alerts, documentation changes and visual refinements.
+The repository is under active development. Public scripts can receive calculation fixes, usability improvements, alerts, documentation changes and visual refinements.
 
-**Meridian — Futures Setups is currently a beta and work in progress.** It is being validated through Pine compiler checks, TradingView Replay, live-session observation and later research-harness testing. Its current named strategies are Meridian's explicit implementations of their documented rules. Public descriptions of those strategies can differ.
+**Meridian — Futures Setups v0.3 is a beta and work in progress.** The legacy multi-strategy design was replaced with one strategy-neutral Meridian Choice engine and two separate builds:
+
+- daily use;
+- research and diagnostics.
+
+Validation priorities include Bar Replay timing, live-session observation, score-bucket analysis, multi-timeframe zone accuracy and later Meridian Backtester research.
 
 Review the commit history before updating a script so that you understand what changed. Reproducible chart examples and bug reports are welcome through GitHub Issues once issue tracking is enabled.
 
@@ -246,18 +262,18 @@ Review the commit history before updating a script so that you understand what c
 
 Current research and development areas include:
 
-- Futures Setups beta validation and strategy hardening
-- A separate Futures Setups research strategy
-- Futures Auction and footprint research
-- Constituent and intermarket pressure models
-- Additional public strategy templates after formal specification and validation
-- Secure Meridian Intelligence integrations
+- Futures Setups score and threshold validation;
+- a dedicated historical research/strategy companion;
+- separate hypothesis-specific indicators such as mean reversion and session-liquidity models;
+- Futures Auction and footprint research;
+- constituent and intermarket pressure models;
+- secure Meridian Intelligence integrations.
 
 ## Disclaimer
 
 These indicators are research and market-analysis tools. They do not provide financial advice, guarantee a result, place broker orders or replace independent risk management. Historical references, statistical classifications, setup scores and alerts can fail or become less useful when market structure changes.
 
-Futures Setups uses OHLC bars. Historical bars do not reveal the exact intrabar sequence when a stop and target occur in the same candle. Named strategies and scoring thresholds remain subject to continued research.
+Futures Setups uses OHLC bars. Historical bars do not reveal the exact intrabar sequence when a stop and target occur in the same candle. The confluence score is not a probability, win rate or promise of future performance.
 
 <a id="license"></a>
 ## License

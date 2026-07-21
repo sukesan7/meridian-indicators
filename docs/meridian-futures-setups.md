@@ -1,8 +1,11 @@
 # Meridian — Futures Setups
 
+> **Version: v0.3.0 Beta**  
 > **Status: Beta · Work in progress**
 
-[← Documentation index](./README.md) · [Main repository README](../README.md) · [View Pine source](../indicators/futures/meridian-futures-setups/meridian-futures-setups-v0.2.pine)
+[← Documentation index](./README.md) · [Main repository README](../README.md)
+
+**Source:** [Daily build](../indicators/futures/meridian-futures-setups/meridian-futures-setups-v0.3.0-beta.pine) · [Research build](../indicators/futures/meridian-futures-setups/meridian-futures-setups-research-v0.3.0-beta.pine)
 
 <p align="center">
   <a href="../screenshots/Meridian_Futures_Setups.png">
@@ -10,359 +13,502 @@
   </a>
 </p>
 
-> The screenshot file is reserved as `screenshots/Meridian_Futures_Setups.png`. Add the final beta screenshot when the visual design is ready.
-
 ## Purpose
 
-Meridian — Futures Setups is a stateful setup scanner for NQ, MNQ, ES and MES. It continuously registers liquidity, structure, displacement, setup zones, session context and NQ/ES SMT divergence. The chart remains clean until a complete setup passes its mandatory gates, reaches the required confluence score and confirms its entry rule.
+Meridian — Futures Setups is a strategy-neutral, multi-timeframe confluence scanner for NQ, MNQ, ES and MES.
 
-The indicator does not place broker orders. `BUY` and `SELL` markers are rule-based trade hypotheses.
+It does not contain Silver Bullet, Unicorn Model or other named strategy playbooks. The indicator uses one focused **Meridian Choice** engine:
+
+1. Detect valid market zones.
+2. Measure the authority of each zone.
+3. Find overlapping confluence across timeframes.
+4. Evaluate execution structure, liquidity and context.
+5. Apply mandatory lifecycle and risk gates.
+6. Select the strongest qualified opportunity.
+7. Produce a BUY or SELL hypothesis only after the full model passes.
+
+The indicator does not place broker orders. A signal is a rule-based analytical hypothesis, not a guarantee.
+
+## Two builds
+
+The project includes two Pine Script indicators with the same live qualification rules.
+
+### Daily build
+
+Use the daily build for normal chart operation.
+
+Default behavior:
+
+- no raw zone drawings;
+- no rejected-candidate labels;
+- no dashboard;
+- one active trade;
+- live threshold of 80;
+- at least four independent categories;
+- one trade per structural leg;
+- only live-qualified signals receive full trade geometry.
+
+### Research build
+
+Use the research build to inspect how the engine behaves.
+
+It adds:
+
+- active multi-timeframe zone drawings;
+- timeframe, zone type and score labels;
+- rejected touched candidates;
+- rejection reasons;
+- score-component breakdowns;
+- candidate, signal, winner and stopped totals;
+- outcome counts by score bucket.
+
+The research build does **not** lower the live signal threshold. It does not convert a rejected or low-score candidate into a BUY or SELL trade.
 
 ## Recommended chart configuration
 
-- Primary timeframe: 1 minute
-- Supported working timeframes: 1, 3, 5 and 15 minutes
-- Markets: NQ, MNQ, ES and MES
-- Chart type: standard candles
-- Session: extended hours
-- Default timezone: `America/New_York`
-- Initial strategy: `Meridian Choice`
-- Initial scoring profile: `Balanced`
-- Normal display mode: `Minimal` or `Signals`
+```text
+Market: NQ or ES
+Primary timeframe: 1 minute
+Accepted working timeframes: 2–5 minutes
+Chart type: standard candles
+Extended hours: enabled
+Session timezone: America/New_York
+Futures session: 18:00–17:00 ET
+Default signal window: 08:00–16:00 ET
+Minimum score: 80
+Minimum independent categories: 4
+Entry mode: Rejection close
+Require first qualified touch: enabled
+Maximum active trades: 1
+```
 
-Use `Research` mode only when you need to inspect qualification state, rejected candidates or scoring diagnostics.
+The indicator reads the configured full futures session, including overnight and premarket bars. The signal window controls when new trades can qualify. Zone detection and context calculations can continue outside that signal window.
 
-## Core design
+Synthetic candles are not recommended as an execution reference.
 
-The indicator separates four systems:
+## Core architecture
 
-1. **Strategy Mode** defines the playbook.
-2. **Concept Family** limits eligible zone types.
-3. **Scoring Profile** controls qualification strictness.
-4. **Entry Mode** controls the final trigger.
+The engine has four main layers:
 
-Concepts do not create independent signals by themselves. They provide evidence to a shared setup lifecycle.
+1. **Zone detection** registers FVG, IFVG, OB and BB structures.
+2. **Confluence analysis** measures timeframe authority, nesting and surrounding evidence.
+3. **Qualification** applies score, category, structure, displacement, stop and objective gates.
+4. **Trade lifecycle** manages entry, risk/reward drawings, terminal outcomes and cleanup.
 
-## Strategy modes
+No single indicator concept can create a trade by itself.
 
-### Meridian Choice
+# Zone engine
 
-Meridian Choice is the general confluence scanner. It can qualify an FVG, IFVG, Order Block or Breaker Block when the selected liquidity, structure, displacement, session, zone-quality and score rules pass.
+## Timeframes
 
-### Unicorn Model
+The engine can detect zones from:
 
-The current Meridian implementation requires:
+- chart timeframe;
+- 5 minutes;
+- 15 minutes;
+- 30 minutes;
+- 1 hour;
+- 4 hours.
 
-- Registered liquidity sweep and reclaim
-- Confirmed Market Structure Shift
-- Valid displacement
-- Breaker Block and FVG/IFVG overlap
-- Valid qualification window
-- Acceptable zone size
-- Score at or above the selected threshold
+Each timeframe can be enabled or disabled independently. Zone lifetime is also configurable by timeframe.
 
-When `Entry mode` is `Strategy defined`, the Unicorn Model uses a consequent-encroachment trigger.
+Higher-timeframe zones use completed source candles. The zone is registered when that completed information first becomes available to the chart. The drawing is not moved backward to the original higher-timeframe candle.
 
-### Silver Bullet
+## Fair Value Gap
 
-The current Meridian implementation requires:
+A bullish Fair Value Gap is a three-candle imbalance where the newer candle's low is above the older candle's high.
 
-- A configured New York time window
-- Registered liquidity sweep and reclaim
-- Confirmed Market Structure Shift
-- Valid displacement
-- A fresh displacement-created FVG
-- Acceptable zone size
-- Score at or above the selected threshold
+A bearish Fair Value Gap is the opposite condition.
 
-Default New York windows:
+The engine stores:
 
-- 03:00–04:00: disabled
-- 10:00–11:00: enabled
-- 14:00–15:00: enabled
+- direction;
+- top and bottom boundaries;
+- midpoint;
+- source timeframe;
+- source ATR;
+- detection time;
+- expiry time;
+- touch count;
+- fill percentage;
+- state.
 
-When `Entry mode` is `Strategy defined`, Silver Bullet uses consequent encroachment.
+## Inversion FVG
 
-### All Enabled
+An active FVG can become an IFVG after price closes through its invalidating boundary. The transformed zone is tracked in the opposite direction.
 
-This mode evaluates Meridian Choice, Unicorn Model and Silver Bullet at the same time. If several strategies match one zone, the indicator keeps one setup and records all matches. It does not create duplicate overlapping trades for the same zone.
+An IFVG is not detected as an unrelated new shape. It is a lifecycle transformation of a previously registered FVG.
 
-### Custom Confluence
+## Order Block
 
-This mode uses the user-defined score threshold and mandatory gates. The user can require:
+The current OB model uses the immediate opposing candle before confirmed displacement and a source-timeframe structure break.
 
-- Sweep and reclaim
-- MSS
-- Displacement
-- SMT
-- Session window
+The script does not classify every opposite-colored candle as an Order Block.
 
-## Concept families
+## Breaker Block
 
-The user can limit eligible setup zones to:
+A BB is created after a registered Order Block fails through its invalidating boundary. The BB is therefore a transformed OB, not an independently selected candle sequence.
 
-- All
-- FVG
-- IFVG
-- OB
-- BB
+## Zone-size limits
 
-The internal engine can continue to track supporting concepts because some strategies require relationships between more than one zone type.
-
-## Liquidity registry
-
-The script can register:
-
-- Prior-day high and low
-- Prior-week high and low
-- Overnight high and low
-- Opening Range high and low
-- Initial Balance high and low
-- Confirmed chart pivots
-- Confirmed 15-minute, 1-hour, 4-hour and daily highs and lows
-
-Liquidity states distinguish:
-
-- Active
-- Touched
-- Penetrated
-- Reclaimed
-- Accepted
-- Consumed
-- Expired
-
-A simple touch is not automatically classified as a reversal sweep.
-
-## Structure and displacement
-
-The setup engine evaluates:
-
-- Confirmed Break of Structure
-- Confirmed Market Structure Shift
-- Candle body divided by ATR
-- Body-to-range fraction
-- Close location within the candle
-- Directional efficiency
-- Same-time-of-day RTH RVOL
-- Rolling realized-volatility context
-
-Confirmed pivots are acted on after their right-side confirmation bars complete. Pivot-dependent events are recorded on the confirmation bar, not moved backward to the pivot origin.
-
-## Zone engines
-
-### FVG
-
-The indicator detects bullish and bearish three-candle Fair Value Gaps. It tracks age, fill percentage, first touch, invalidation and expiry.
-
-### IFVG
-
-An FVG can invert after a confirmed close through its invalidating boundary. The new zone is tracked in the opposite direction.
-
-### Order Block
-
-An Order Block must be connected to validated displacement and structure. The indicator does not classify every opposing candle as an Order Block.
-
-### Breaker Block
-
-A Breaker Block is transformed from a failed Order Block after the required directional and structural conditions pass.
-
-## NQ/ES SMT
-
-The indicator supports automatic NQ-to-ES and ES-to-NQ pairing. It can also use a manual comparison symbol.
-
-SMT uses confirmed pivot divergence and an ATR-normalized divergence threshold. SMT is confluence only. It cannot create a setup by itself.
-
-## Confluence scoring
-
-The score combines seven capped categories:
-
-| Category | Default maximum |
-|---|---:|
-| Liquidity event | 20 |
-| Displacement and structure | 20 |
-| Zone quality | 20 |
-| Higher-timeframe context | 15 |
-| SMT confirmation | 10 |
-| Session and participation | 10 |
-| Premium or discount location | 5 |
-
-The result is normalized to a value from 0 to 100. The score is not a probability and is not a historical win rate.
-
-### Scoring profiles
-
-| Profile | Default threshold | Core behavior |
-|---|---:|---|
-| Strict | 75 | Requires sweep, MSS, displacement and session |
-| Balanced | 65 | Requires sweep, structure, displacement and session |
-| Aggressive | 55 | Requires sweep, structure and session |
-| Research | 0 | Reduces hard gates for diagnostics |
-| Custom | User-defined | Uses custom mandatory gates |
-
-Mandatory gates remain separate from the score. A high score cannot replace a required event.
-
-## Entry and trade lifecycle
-
-A setup can progress through these states:
+The script normalizes zone width by the source-timeframe ATR:
 
 ```text
-Detected
-→ Candidate
-→ Qualified
-→ Armed
-→ Entry pending
-→ Triggered
+normalized zone width = zone height / source ATR
+```
+
+Zones below the minimum size or above the maximum size are rejected. This prevents negligible gaps and unusually large zones from receiving misleading authority.
+
+# Meridian Choice scoring
+
+The score contains six capped categories.
+
+| Category | Maximum | Main evidence |
+|---|---:|---|
+| Zone authority | 30 | Source timeframe, zone type and ATR-normalized width |
+| Multi-timeframe overlap | 25 | Same-direction overlap and full nesting |
+| Execution structure | 20 | BOS/MSS and displacement |
+| Liquidity and structure | 15 | Sweeps, repeated-wick pools, major references and freshness |
+| Context | 10 | VWAP, HTF alignment, z-score, RSI and RVOL |
+| Intermarket and session | 5 | NQ/ES SMT, PO3 proxy and Opening Range retest |
+
+The total is capped at 100.
+
+The score is not a probability, win rate or forecast confidence percentage.
+
+## Zone authority
+
+Base authority increases with timeframe:
+
+| Source | Base points |
+|---|---:|
+| Chart timeframe | 5 |
+| 5-minute | 8 |
+| 15-minute | 12 |
+| 30-minute | 15 |
+| 1-hour | 18 |
+| 4-hour | 22 |
+
+Type adjustments:
+
+- OB: additional authority;
+- IFVG: additional authority;
+- BB: highest type adjustment.
+
+ATR-normalized width can add up to four points. The complete category is capped at 30.
+
+## Multi-timeframe overlap
+
+Same-direction zones receive additional points when their price ranges overlap.
+
+Examples:
+
+- chart-timeframe IFVG inside a 30-minute BB;
+- 5-minute OB overlapping a 1-hour FVG;
+- 15-minute FVG inside a 4-hour FVG.
+
+A fully nested zone receives an additional adjustment. The category is capped at 25 so that many correlated zones cannot inflate the score without limit.
+
+## Execution structure
+
+The chart execution layer evaluates:
+
+- confirmed Break of Structure;
+- confirmed Market Structure Shift;
+- recent directional displacement;
+- displacement body divided by ATR;
+- body as a fraction of candle range.
+
+MSS contributes more than a normal BOS. Structure and displacement remain separate mandatory gates when their settings are enabled.
+
+## Liquidity and structural references
+
+The engine can use:
+
+- previous-day high and low;
+- previous-week high and low;
+- overnight high and low;
+- Opening Range high and low;
+- confirmed chart pivots;
+- recent liquidity events;
+- repeated-wick liquidity pools.
+
+### Repeated-wick pools
+
+The script clusters confirmed pivot highs or lows inside a configurable tick tolerance. A cluster must contain the required number of touches before it contributes to a score.
+
+This is an OHLC-derived liquidity proxy. It does not show resting limit orders, queue data or Depth of Market liquidity.
+
+## Context
+
+### VWAP
+
+The indicator calculates:
+
+- full futures-session VWAP;
+- RTH VWAP after 09:30 ET;
+- rejection, reclaim and proximity behavior near the active VWAP.
+
+### Higher-timeframe alignment
+
+Confirmed 1-hour and 4-hour price/EMA relationships provide a small directional context contribution.
+
+### Rolling z-score
+
+The z-score measures price relative to its rolling mean and standard deviation. An extreme reading contributes only when price starts to move back in the setup direction.
+
+### RSI
+
+RSI is a minor supporting input. RSI cannot qualify a trade independently.
+
+### Same-time RVOL
+
+The engine compares current volume with historical volume from the same futures-session time slot. The feature requires enough prior sessions before it becomes available.
+
+## Intermarket and session context
+
+### NQ/ES SMT
+
+The script compares confirmed NQ and ES pivots. Divergence is valid only when the two pivot confirmations occur within the configured separation window.
+
+SMT is supporting evidence. It cannot create a signal independently.
+
+### Power of Three proxy
+
+The current PO3 component uses a documented session proxy:
+
+- overnight range as accumulation;
+- a sweep/reclaim of overnight or major liquidity as manipulation;
+- movement away through session VWAP as distribution.
+
+It does not claim to reproduce every discretionary interpretation of Power of Three.
+
+### Opening Range
+
+The Opening Range module detects a confirmed breakout and retest of the configured 09:30 range.
+
+# Independent-category requirement
+
+A score must include evidence from enough independent categories.
+
+The default requirement is four categories. The category count prevents one cluster of correlated observations from creating a trade only because several related points were added together.
+
+# Mandatory live gates
+
+A BUY or SELL signal requires all enabled gates to pass:
+
+1. Supported symbol and timeframe.
+2. Active signal window.
+3. Valid FVG, IFVG, OB or BB.
+4. Confirmed interaction with the zone.
+5. Minimum total score.
+6. Minimum independent-category count.
+7. Recent BOS or MSS, when required.
+8. Recent displacement, when required.
+9. First qualified touch, when required.
+10. Valid stop distance.
+11. Sufficient room to the nearest objective.
+12. Same-direction cooldown permission.
+13. One-trade-per-structural-leg permission.
+14. Available active-trade capacity.
+
+A high score cannot bypass these gates.
+
+## Strongest-zone selection
+
+Several zones can qualify on the same confirmed bar. The engine selects only the strongest qualified zone rather than opening a trade for every visible concept.
+
+# Entry and risk
+
+## Entry modes
+
+### First touch
+
+The setup triggers when price first intersects the qualified zone.
+
+### Midpoint reclaim
+
+Price must trade through the zone midpoint and close back on the setup side of that midpoint.
+
+### Rejection close
+
+This is the default. Price must intersect the zone and close with a directional candle back through the zone midpoint.
+
+## Stop placement
+
+The default stop is placed beyond the setup-zone invalidation boundary plus a configurable tick buffer:
+
+- bullish setup: below the zone;
+- bearish setup: above the zone.
+
+## Stop-size filters
+
+The stop must be on the correct side of entry and inside both tick and ATR limits.
+
+Automatic maximum tick defaults:
+
+- NQ/MNQ: 32 ticks;
+- ES/MES: 12 ticks.
+
+A second ATR-based maximum remains active unless stop-size filtering is disabled.
+
+## Objective-space gate
+
+The engine searches for the nearest valid objective in the trade direction from:
+
+- PDH/PDL;
+- PWH/PWL;
+- overnight high/low;
+- Opening Range high/low.
+
+The setup can be rejected when there is not enough room between entry and that objective relative to the proposed risk.
+
+# Trade visualization
+
+A qualified trade shows:
+
+- compact `BUY • score` or `SELL • score` label;
+- setup-zone shading;
+- transparent red risk region;
+- strongest green tint from entry to 1R;
+- lighter green tint from 1R to 1.5R;
+- lightest green tint from 1.5R to 2R;
+- bright STOP line;
+- bright 1R, 1.5R and 2R lines.
+
+There is no separate entry line.
+
+# Trade lifecycle
+
+A trade progresses through:
+
+```text
+Triggered
 → Active
 → Partial target
 → Completed, stopped or time expired
-→ Faded retention
-→ Removed
+→ Retained or removed
 ```
 
-Entry options include:
+The default maximum drawing duration is 30 minutes. The trade ends earlier when the stop or 2R target is reached.
 
-- Strategy defined
-- First touch
-- Consequent encroachment
-- Confirmed rejection
+Outcome processing begins after the entry candle. If a later historical OHLC candle contains both the stop and a target, the script uses a conservative stop-first assumption.
 
-## Stop system
+## Retention
 
-### Invalidation Boundary
+Default behavior:
 
-This is the default and tightest standard mode.
-
-- Bullish stop: below the far boundary of the setup zone
-- Bearish stop: above the far boundary of the setup zone
-- Configurable tick buffer
-
-### Sweep Extreme
-
-The stop is placed beyond the linked liquidity-sweep extreme.
-
-### Structure Swing
-
-The stop is placed beyond the latest confirmed swing that supports the trade direction.
-
-### Stop-size filters
-
-The script can reject a setup before entry when the required stop is unsuitable.
-
-Initial automatic limits:
-
-- NQ/MNQ maximum: 32 ticks
-- ES/MES maximum: 12 ticks
-- Maximum stop divided by ATR: 0.75
-- Minimum stop: 2 ticks
-
-These values are provisional research defaults.
-
-## Risk and reward display
-
-After entry, the indicator shows:
-
-- A compact `BUY` or `SELL` marker
-- No entry line
-- Transparent red shading from entry to stop
-- Tiered green shading from entry to 1R, 1R to 1.5R and 1.5R to 2R
-- Bright stop line
-- Bright 1R, 1.5R and 2R target lines
-
-The far reward tiers use lighter transparency so that the nearest objective remains visually strongest.
-
-## Trade duration and retention
-
-The default active duration is 30 minutes.
-
-Trade drawings end at the earliest of:
-
-- Stop hit
-- 2R hit
-- Active-duration expiry
-
-Time-expired outcomes can show `TIME`, `TIME +1R` or `TIME +1.5R`.
-
-Default terminal retention:
-
-- Drawings fade when the trade becomes terminal.
-- Drawings remain visible for 5 minutes.
-- The trade is then removed.
+- terminal drawings fade;
+- drawings remain for five minutes;
+- the trade is removed.
 
 When **Show past trades** is enabled:
 
-- Terminal trades remain in a faded historical state.
-- Default retention is 22 hours.
-- Retention is configurable.
-- A hard retained-trade limit prevents drawing exhaustion.
+- terminal trades remain in a faded historical state;
+- default retention is 22 hours;
+- retention is configurable;
+- the retained-trade count is bounded.
 
-## Display modes
+# Research output
 
-| Mode | Visible output |
-|---|---|
-| Minimal | Armed zones and active or briefly retained trades |
-| Signals | Triggered trades and outcomes |
-| Qualified Zones | Qualified and armed candidate zones |
-| All Concepts | Broader zone and concept diagnostics |
-| Research | Qualification reasons, scores and engine status |
+The research build can show an active zone when its score is above the separate research-candidate threshold.
 
-Research mode is intentionally more cluttered than normal operation.
+Rejected candidates can include reasons such as:
 
-## Confirmed-only execution model
+- score/categories;
+- no structure;
+- no displacement;
+- not first touch;
+- invalid stop;
+- objective too close;
+- outside signal window;
+- lifecycle gate.
 
-The critical setup path uses confirmed bars:
+Research score buckets:
 
-- Higher-timeframe values use completed HTF bars.
-- Confirmed HTF requests use completed `[1]` expressions.
-- Chart pivots are used after confirmation.
-- Zone qualification, scoring and entries are processed on confirmed bars.
-- Historical stop and target checks begin after the entry bar.
-- When a later OHLC candle contains both a stop and target, the overlay uses a conservative stop-first rule.
+- below 60;
+- 60–69;
+- 70–79;
+- 80–89;
+- 90 and above.
 
-This prevents the script from drawing an earlier historical signal that was not knowable at the time. It does not provide intrabar sequencing that is absent from OHLC data.
+These statistics are diagnostic counts, not a complete strategy backtest.
 
-## Alerts
+# Confirmed-data and repainting model
 
-Static and optional JSON events include:
+The critical path uses confirmed information:
 
-- Candidate armed
-- Entry triggered
-- Target reached
-- Stop reached
-- Candidate expired
-- Candidate superseded
-- Trade time expired
-- Trade completed
+- higher-timeframe zones use completed source candles;
+- confirmed HTF values are requested with completed expressions;
+- chart pivots are used only after confirmation;
+- BOS, MSS, qualification and entries run on confirmed chart bars;
+- a pivot-dependent event appears when it becomes knowable, not at the historical pivot origin;
+- HTF zone drawings begin when the chart receives the completed zone;
+- signals are not moved backward after later bars form;
+- stop and target checks begin after the entry bar.
 
-The JSON schema is `meridian.futures_setups.event.v2`.
+Confirmed pivots have unavoidable delay. This delay is preferable to drawing a historical signal before it could have been known.
 
-## Important limitations
+# Alerts
+
+Available static alerts:
+
+- Meridian BUY;
+- Meridian SELL;
+- 2R target reached;
+- stop reached.
+
+Optional dynamic JSON alerts use:
+
+```text
+meridian.futures_setups.event.v3
+```
+
+# Important limitations
 
 - The indicator does not place orders.
 - It does not use footprint, DOM or resting-order-book data.
-- OHLC bars do not show the exact order of intrabar stop and target events.
-- Continuous futures symbols can have rollover and back-adjustment effects.
-- Strategy names refer to Meridian's documented rule definitions. Public descriptions can differ.
-- Stop limits, score thresholds and strategy rules remain under beta validation.
-- A dedicated Strategy Tester companion is a separate future deliverable.
+- Repeated-wick pools are OHLC proxies, not measured order-book liquidity.
+- Historical OHLC candles do not reveal the exact intrabar sequence of stop and target events.
+- Continuous futures symbols can contain rollover and back-adjustment effects.
+- Confirmed pivots create unavoidable signal delay.
+- OB and BB definitions are systematic Meridian implementations, not universal discretionary definitions.
+- Score weights and thresholds are initial research values.
+- Research counts are not a substitute for a full strategy backtest.
 
-## Beta validation checklist
+# Beta validation checklist
 
 Before relying on a new release:
 
-1. Compile the source in TradingView Pine Editor.
+1. Compile both source files in TradingView Pine Editor.
 2. Test NQ and ES separately.
-3. Test a 1-minute extended-hours chart.
-4. Verify one bullish and one bearish setup in Replay.
-5. Confirm that the signal appears only after the qualifying candle closes.
-6. Confirm that no pivot-based signal is backfilled onto an earlier bar.
-7. Confirm that the stop, target and 30-minute expiry end the active drawings.
-8. Confirm that five-minute cleanup works with past trades disabled.
-9. Enable past trades and confirm faded 22-hour retention.
-10. Use Research mode to inspect rejected setup reasons.
+3. Use a one-minute chart with extended hours enabled.
+4. Confirm that overnight and premarket bars contribute to zone state.
+5. Verify one bullish and one bearish signal in Bar Replay.
+6. Confirm that an HTF zone first appears only after its source candle completes.
+7. Confirm that no pivot-dependent signal is moved to an earlier candle.
+8. Confirm that only the strongest qualified zone triggers on one bar.
+9. Confirm that rejected research candidates do not receive BUY/SELL trade geometry.
+10. Confirm stop, 2R and 30-minute expiry behavior.
+11. Confirm five-minute cleanup with past trades disabled.
+12. Confirm faded 22-hour retention with past trades enabled.
+13. Compare score buckets over multiple sessions before changing weights.
 
-## Development status
+# Development status
 
-Futures Setups is a **beta and work in progress**. The source is public so that compiler fixes, calculation changes and lifecycle adjustments can be reviewed through Git history. The indicator will continue to receive validation, visual cleanup and strategy-definition updates.
+Meridian — Futures Setups v0.3 is a **beta and work in progress**.
 
-## License
+The former multi-strategy design was archived. The public indicator now focuses only on the strategy-neutral Meridian Choice confluence model. Hypothesis-specific methods will be developed as separate indicators rather than added as playbook modes inside this script.
+
+Planned work includes:
+
+- score and category validation;
+- replay and live-session integrity testing;
+- a dedicated strategy/research companion;
+- improved objective and zone-quality modeling;
+- separate mean-reversion and session-specific setup indicators;
+- integration with future Meridian Backtester research.
+
+# License
 
 This source is covered by the repository's [Mozilla Public License 2.0](../LICENSE). The license does not grant rights to the Meridian Trading name, logos, branding, premium products or private infrastructure.
