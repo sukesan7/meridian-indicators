@@ -1,23 +1,26 @@
-# OS/editor files
+# Operating systems
 .DS_Store
 Thumbs.db
+
+# Editors
 .vscode/
 .idea/
+*.swp
 
-# Temporary files
+# Python validation artifacts
+__pycache__/
+*.py[cod]
+
+# Temporary and local files
 *.tmp
 *.bak
 *.log
-
-# Archives / exports
-*.zip
-*.rar
-*.7z
-
-# Secrets / local config
 .env
 .env.*
 secrets/
 private/
-paid/
-invite-only/
+
+# Local archives and exports
+*.zip
+*.rar
+*.7z

@@ -1,0 +1,5 @@
+* text=auto eol=lf
+*.pine text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.png binary
