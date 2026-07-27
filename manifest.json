@@ -1,0 +1,73 @@
+{
+  "repository": "meridian-indicators",
+  "release": "0.1.0",
+  "release_date": "2026-07-25",
+  "pine_version": 6,
+  "license": "MPL-2.0",
+  "indicators": [
+    {
+      "id": "options-levels",
+      "name": "Meridian — Options Levels",
+      "version": "0.1.7",
+      "market": "options-underlyings",
+      "status": "stable",
+      "source": "src/options/meridian-options-levels.pine",
+      "documentation": "docs/indicators/options-levels.md"
+    },
+    {
+      "id": "options-context",
+      "name": "Meridian — Options Context",
+      "version": "0.1.1",
+      "market": "options-underlyings",
+      "status": "stable",
+      "source": "src/options/meridian-options-context.pine",
+      "documentation": "docs/indicators/options-context.md",
+      "dependency": "TradingView/ta/12"
+    },
+    {
+      "id": "futures-levels",
+      "name": "Meridian — Futures Levels",
+      "version": "0.1.0",
+      "market": "index-futures",
+      "status": "stable",
+      "source": "src/futures/meridian-futures-levels.pine",
+      "documentation": "docs/indicators/futures-levels.md"
+    },
+    {
+      "id": "futures-context",
+      "name": "Meridian — Futures Context",
+      "version": "0.1.7",
+      "market": "index-futures",
+      "status": "stable",
+      "source": "src/futures/meridian-futures-context.pine",
+      "documentation": "docs/indicators/futures-context.md"
+    },
+    {
+      "id": "futures-profile",
+      "name": "Meridian — Futures Profile",
+      "version": "0.1.2",
+      "market": "index-futures",
+      "status": "preview",
+      "source": "src/futures/meridian-futures-profile.pine",
+      "documentation": "docs/indicators/futures-profile.md"
+    },
+    {
+      "id": "futures-setups",
+      "name": "Meridian — Futures Setups",
+      "version": "0.3.6-beta",
+      "market": "index-futures",
+      "status": "beta",
+      "source": "src/futures/meridian-futures-setups.pine",
+      "documentation": "docs/indicators/futures-setups.md"
+    },
+    {
+      "id": "futures-setups-research",
+      "name": "Meridian — Futures Setups Research",
+      "version": "0.3.6-beta",
+      "market": "index-futures",
+      "status": "beta-research",
+      "source": "src/futures/meridian-futures-setups-research.pine",
+      "documentation": "docs/indicators/futures-setups.md"
+    }
+  ]
+}
