@@ -9,6 +9,13 @@ import sys
 from pathlib import Path
 from urllib.parse import unquote
 
+from repo_utils import (
+    BARE_WEB_TARGET_PATTERN,
+    is_external_markdown_target,
+    iter_repository_files,
+    split_markdown_target,
+)
+
 ROOT = Path(__file__).resolve().parents[1]
 ERRORS: list[str] = []
 
@@ -58,7 +65,10 @@ def check_manifest(manifest: dict) -> None:
         if "setups" in indicator_id and f'const string VERSION = "{version}"' not in text:
             fail(f"setup VERSION constant does not match manifest: {source}")
 
-    actual_sources = {str(path.relative_to(ROOT)).replace("\\", "/") for path in (ROOT / "src").rglob("*.pine")}
+    actual_sources = {
+        str(path.relative_to(ROOT)).replace("\\", "/")
+        for path in (ROOT / "src").rglob("*.pine")
+    }
     unlisted = sorted(actual_sources - seen_sources)
     if unlisted:
         fail(f"Pine sources missing from manifest: {', '.join(unlisted)}")
@@ -97,9 +107,8 @@ def check_pine_files() -> None:
             if balance != 0:
                 fail(f"{rel}: unbalanced {opening}{closing} delimiters ({balance})")
 
-
         for line_number, line in enumerate(lines, 1):
-            if line.rstrip() != line:
+            if line.rstrip(" \t") != line:
                 fail(f"{rel}: trailing whitespace on line {line_number}")
 
         if re.search(r"-v\d", path.name):
@@ -118,13 +127,24 @@ def markdown_links(text: str) -> list[str]:
 
 
 def check_markdown_links() -> None:
-    for path in sorted(ROOT.rglob("*.md")):
+    markdown_files = sorted(
+        path for path in iter_repository_files(ROOT, text_only=True) if path.suffix.lower() == ".md"
+    )
+    for path in markdown_files:
         text = path.read_text(encoding="utf-8")
         for raw_target in markdown_links(text):
-            target = raw_target.split("#", 1)[0]
-            if not target or "://" in target or target.startswith("mailto:"):
+            target, _ = split_markdown_target(raw_target)
+            target_without_fragment = target.split("#", 1)[0]
+            if not target_without_fragment or is_external_markdown_target(target):
                 continue
-            local = (path.parent / unquote(target)).resolve()
+            if BARE_WEB_TARGET_PATTERN.fullmatch(target):
+                fail(
+                    f"{path.relative_to(ROOT)}: external link is missing a URL scheme: "
+                    f"{raw_target} (use https://{target})"
+                )
+                continue
+
+            local = (path.parent / unquote(target_without_fragment)).resolve()
             try:
                 local.relative_to(ROOT.resolve())
             except ValueError:
@@ -138,8 +158,8 @@ def normalize_setup(text: str) -> str:
     replacements = {
         '"Meridian — Futures Setups Research"': '"Meridian — Futures Setups"',
         'shorttitle = "Meridian Setups Research"': 'shorttitle = "Meridian Futures Setups"',
-        '// Meridian — Futures Setups Research · v0.3.6-beta': '// Meridian — Futures Setups · v0.3.6-beta',
-        'const bool RESEARCH_BUILD = true': 'const bool RESEARCH_BUILD = false',
+        "// Meridian — Futures Setups Research · v0.3.6-beta": "// Meridian — Futures Setups · v0.3.6-beta",
+        "const bool RESEARCH_BUILD = true": "const bool RESEARCH_BUILD = false",
         'bool showAllResearchZones = input.bool(true, "Show active research zones"': 'bool showAllResearchZones = input.bool(false, "Show active research zones"',
     }
     for old, new in replacements.items():
@@ -156,22 +176,40 @@ def check_setup_parity() -> None:
 
 def check_release_hygiene() -> None:
     required = [
-        "README.md", "LICENSE", "CHANGELOG.md", "CONTRIBUTING.md", "SECURITY.md",
-        "DISCLAIMER.md", "manifest.json", "docs/getting-started.md", "docs/architecture.md",
-        "docs/data-integrity.md", "docs/troubleshooting.md",
+        "README.md",
+        "LICENSE",
+        "CHANGELOG.md",
+        "CONTRIBUTING.md",
+        "SECURITY.md",
+        "DISCLAIMER.md",
+        "manifest.json",
+        "docs/getting-started.md",
+        "docs/architecture.md",
+        "docs/data-integrity.md",
+        "docs/troubleshooting.md",
+        "tools/format_repo.py",
     ]
     for rel in required:
         if not (ROOT / rel).exists():
             fail(f"required release file is missing: {rel}")
 
     forbidden_fragments = ("v0.3.0-beta", "meridian-futures-setups-legacy", "YOUR_USERNAME")
-    for path in ROOT.rglob("*"):
-        if not path.is_file() or path.suffix.lower() in {".png", ".zip", ".pyc"} or "__pycache__" in path.parts or path == Path(__file__).resolve():
+    validator_path = Path(__file__).resolve()
+    utility_path = (ROOT / "tools/repo_utils.py").resolve()
+
+    for path in iter_repository_files(ROOT, text_only=True):
+        resolved = path.resolve()
+        if resolved in {validator_path, utility_path}:
             continue
-        text = path.read_text(encoding="utf-8", errors="replace")
+
+        text = path.read_text(encoding="utf-8")
         for line_number, line in enumerate(text.splitlines(), 1):
-            if line.rstrip() != line:
+            if line.rstrip(" \t") != line:
                 fail(f"{path.relative_to(ROOT)}: trailing whitespace on line {line_number}")
+        if text and not text.endswith("\n"):
+            fail(f"{path.relative_to(ROOT)}: missing final newline")
+        if "\r" in text:
+            fail(f"{path.relative_to(ROOT)}: non-LF line endings detected")
         for fragment in forbidden_fragments:
             if fragment in text:
                 fail(f"{path.relative_to(ROOT)}: stale release fragment {fragment!r}")
@@ -192,7 +230,9 @@ def main() -> int:
         return 1
 
     source_count = len(list((ROOT / "src").rglob("*.pine")))
-    document_count = len(list(ROOT.rglob("*.md")))
+    document_count = len(
+        [path for path in iter_repository_files(ROOT, text_only=True) if path.suffix.lower() == ".md"]
+    )
     print(f"Validation passed: {source_count} Pine sources, {document_count} Markdown files.")
     print("Note: static validation does not replace TradingView compilation or market-data testing.")
     return 0
