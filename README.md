@@ -26,7 +26,7 @@ Meridian separates market analysis into focused tools instead of combining every
 
 New to TradingView scripts? Read the [installation and setup guide](./docs/getting-started.md). Technical users can start with the [architecture](./docs/architecture.md) and [data-integrity model](./docs/data-integrity.md).
 
-Join our Community Discord server, [Meridian Desk](google.com).
+Join our Community Discord server, [Meridian Desk](https://discord.gg/greFd258NP).
 
 ## Indicator catalog
 
