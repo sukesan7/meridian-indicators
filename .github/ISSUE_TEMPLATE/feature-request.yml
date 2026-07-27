@@ -1,0 +1,36 @@
+name: Feature request
+description: Propose a focused, explainable improvement
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: dropdown
+    id: indicator
+    attributes:
+      label: Target
+      options:
+        - Options Levels
+        - Options Context
+        - Futures Levels
+        - Futures Context
+        - Futures Profile
+        - Futures Setups
+        - Documentation or repository tooling
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Explain inputs, output, data requirements and why this belongs in the selected component.
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: How could it be validated?
