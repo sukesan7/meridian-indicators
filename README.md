@@ -1,4 +1,4 @@
-UPDATE JUNE 26. -ss
+UPDATE JUNE 27. -ss
 
 <p align="center">
   <img src="./screenshots/Meridian%20Trading%20Banner.png" alt="Meridian Trading" width="100%">
