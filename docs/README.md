@@ -1,21 +1,33 @@
-# Meridian Indicator Documentation
+# Meridian documentation
 
-[← Back to the main README](../README.md)
+[← Main README](../README.md)
 
-The guides in this directory explain each Meridian indicator, its calculations, settings, intended use and known limitations.
+Use the path that matches your goal.
 
-## Options
+## New users
 
-- [Meridian — Options Levels](./meridian-options-levels.md)
-- [Meridian — Options Context](./meridian-options-context.md)
+1. [Getting started](./getting-started.md)
+2. Choose an indicator guide below.
+3. Use [Troubleshooting](./troubleshooting.md) when a level, session or alert does not behave as expected.
 
-## Futures
+## Indicator guides
 
-- [Meridian — Futures Levels](./meridian-futures-levels.md)
-- [Meridian — Futures Context](./meridian-futures-context.md)
-- [Meridian — Futures Profile](./meridian-futures-profile.md)
-- [Meridian — Futures Setups](./meridian-futures-setups.md) — **Beta · Work in progress**
+### Options underlyings
 
-## Documentation status
+- [Options Levels](./indicators/options-levels.md)
+- [Options Context](./indicators/options-context.md)
 
-The documentation follows the public source code and can change as indicators are validated and refined. Futures Setups is currently in beta. Its strategy rules, scoring thresholds, stop limits, retention behavior and visual design remain subject to change.
+### Index futures
+
+- [Futures Levels](./indicators/futures-levels.md)
+- [Futures Context](./indicators/futures-context.md)
+- [Futures Profile](./indicators/futures-profile.md)
+- [Futures Setups](./indicators/futures-setups.md) — beta daily and research builds
+
+## Technical documentation
+
+- [Architecture and design boundaries](./architecture.md)
+- [Data integrity, confirmation and repainting](./data-integrity.md)
+- [Troubleshooting](./troubleshooting.md)
+
+Versions and release status are maintained in [`manifest.json`](../manifest.json). Source files use durable, versionless paths so documentation links remain valid across normal updates.
