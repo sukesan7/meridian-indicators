@@ -1,291 +1,129 @@
-UPDATE JUNE 27. -ss
-
 <p align="center">
-  <img src="./screenshots/Meridian%20Trading%20Banner.png" alt="Meridian Trading" width="100%">
+  <img src="./assets/meridian-banner.png" alt="Meridian Trading" width="100%">
 </p>
 
 <h1 align="center">Meridian Indicators</h1>
 
 <p align="center">
-  Open-source TradingView indicators for structured intraday analysis across options underlyings and index futures.
+  Open-source TradingView indicators for structured intraday analysis of liquid options underlyings and US index futures.
 </p>
 
 <p align="center">
   <img alt="Pine Script v6" src="https://img.shields.io/badge/Pine%20Script-v6-8B5CF6?style=flat-square">
   <img alt="TradingView" src="https://img.shields.io/badge/Platform-TradingView-131722?style=flat-square&logo=tradingview">
-  <img alt="License MPL 2.0" src="https://img.shields.io/badge/License-MPL--2.0-7C3AED?style=flat-square">
-  <img alt="Open Source" src="https://img.shields.io/badge/Source-Open-22C55E?style=flat-square">
-  <img alt="Active Development" src="https://img.shields.io/badge/Status-Active%20Development-F472B6?style=flat-square">
+  <img alt="Release 0.1.0" src="https://img.shields.io/badge/Release-v0.1.0-7C3AED?style=flat-square">
+  <img alt="MPL 2.0" src="https://img.shields.io/badge/License-MPL--2.0-22C55E?style=flat-square">
 </p>
 
-## Overview
 
-**Meridian Indicators** is the public TradingView indicator suite from **Meridian Trading**. The project separates intraday analysis into focused tools:
+## Start here
 
-- **Levels** identifies important session, historical, volatility and confluence references.
-- **Context** describes participation, momentum, volatility, relative strength and market regime.
-- **Profile** shows where the futures auction accepts value and how that value changes.
-- **Setups** ranks multi-timeframe market confluence and produces a temporary trade hypothesis only after the complete qualification model passes.
+Meridian separates market analysis into focused tools instead of combining every concept into one chart script.
 
-The scripts are written in Pine Script v6 and remain fully inspectable. Each indicator documents its calculations, limits and intended use. Meridian indicators are analytical tools. They do not place broker orders and do not guarantee a trade outcome.
+1. Choose an indicator from the catalog below.
+2. Open its source file and copy the complete Pine Script.
+3. In TradingView, open **Pine Editor**, paste the source into a blank indicator, save it, and select **Add to chart**.
 
-## Indicator Suite
+New to TradingView scripts? Read the [installation and setup guide](./docs/getting-started.md). Technical users can start with the [architecture](./docs/architecture.md) and [data-integrity model](./docs/data-integrity.md).
 
-| Indicator | Market | Type | Primary purpose | Status | Documentation | Source |
-|---|---|---|---|---|---|---|
-| **Meridian — Options Levels** | SPY, QQQ and other liquid option underlyings | Overlay | Prior-session levels, premarket structure, Opening Range, RTH VWAP and optional EMA filters | Stable development release | [Read docs](./docs/meridian-options-levels.md) | [View Pine](./indicators/options/meridian-options-levels/meridian-options-levels.pine) |
-| **Meridian — Options Context** | SPY, QQQ and other liquid option underlyings | Lower pane | RSI, same-time RVOL, VWAP/OR/EMA agreement and a transparent context score | Stable development release | [Read docs](./docs/meridian-options-context.md) | [View Pine](./indicators/options/meridian-options-context/meridian-options-context.pine) |
-| **Meridian — Futures Levels** | NQ, ES, MNQ, MES and related futures | Overlay | Session structure, OR, IB, custom VWAP bands, references, projections, clusters and level states | Stable development release | [Read docs](./docs/meridian-futures-levels.md) | [View Pine](./indicators/futures/meridian-futures-levels/meridian-futures-levels.pine) |
-| **Meridian — Futures Context** | NQ, ES, MNQ and MES | Lower pane | Same-time participation, realized volatility, regime, EMA/ADX structure and relative strength | Stable development release | [Read docs](./docs/meridian-futures-context.md) | [View Pine](./indicators/futures/meridian-futures-context/meridian-futures-context-v0.1.6.pine) |
-| **Meridian — Futures Profile** | NQ, ES, MNQ and MES | Overlay | Current/previous TPO profiles, value area, profile structure and Auction Market Theory context | Active development | [Read docs](./docs/meridian-futures-profile.md) | [View Pine](./indicators/futures/meridian-futures-profile/meridian-futures-profile-v0.1.1.pine) |
-| **Meridian — Futures Setups** | NQ, ES, MNQ and MES | Overlay | Strategy-neutral Meridian Choice scanner for multi-timeframe zones, structure, liquidity, context and confirmed trade hypotheses | **Beta · Work in progress** | [Read docs](./docs/meridian-futures-setups.md) | [Daily build](./indicators/futures/meridian-futures-setups/meridian-futures-setups-v0.3.0-beta.pine)<br>[Research build](./indicators/futures/meridian-futures-setups/meridian-futures-setups-research-v0.3.0-beta.pine) |
+Join our Community Discord server, [Meridian Desk](google.com).
+
+## Indicator catalog
+
+| Indicator | Market | What it answers | Status | Source | Guide |
+|---|---|---|---|---|---|
+| **Options Levels** | SPY, QQQ and other liquid underlyings | Where are the main session, prior-day, prior-week, Opening Range and VWAP references? | Stable | [Pine](./src/options/meridian-options-levels.pine) | [Guide](./docs/indicators/options-levels.md) |
+| **Options Context** | SPY, QQQ and other liquid underlyings | Do momentum, relative volume, VWAP, Opening Range and EMA structure agree? | Stable | [Pine](./src/options/meridian-options-context.pine) | [Guide](./docs/indicators/options-context.md) |
+| **Futures Levels** | NQ, MNQ, ES and MES | Where are the objective session levels, projections and confluence clusters? | Stable | [Pine](./src/futures/meridian-futures-levels.pine) | [Guide](./docs/indicators/futures-levels.md) |
+| **Futures Context** | NQ, MNQ, ES and MES | Is participation, volatility, trend quality and relative strength consistent with the current regime? | Stable | [Pine](./src/futures/meridian-futures-context.pine) | [Guide](./docs/indicators/futures-context.md) |
+| **Futures Profile** | NQ, MNQ, ES and MES | Where is the auction accepting value, and how is the profile developing? | Preview | [Pine](./src/futures/meridian-futures-profile.pine) | [Guide](./docs/indicators/futures-profile.md) |
+| **Futures Setups** | NQ, MNQ, ES and MES | Has one multi-timeframe zone passed the complete Meridian Choice qualification model? | Beta | [Daily](./src/futures/meridian-futures-setups.pine) · [Research](./src/futures/meridian-futures-setups-research.pine) | [Guide](./docs/indicators/futures-setups.md) |
+
+**Status meanings:** Stable scripts are the recommended public builds. Preview scripts are usable but still undergoing calculation and interface refinement. Beta scripts require active validation and can change materially between versions.
+
+The machine-readable [manifest](./manifest.json) records the current source paths, versions and status labels.
 
 ## Screenshots
 
 <table>
   <tr>
-    <td width="50%" valign="top">
-      <a href="./docs/meridian-options-levels.md"><img src="./screenshots/Meridian_Options_Levels.png" alt="Meridian Options Levels"></a>
-      <br><b>Options Levels</b><br>
-      Session-aware references for liquid option underlyings.
-    </td>
-    <td width="50%" valign="top">
-      <a href="./docs/meridian-options-context.md"><img src="./screenshots/Meridian_Options_Context.png" alt="Meridian Options Context"></a>
-      <br><b>Options Context</b><br>
-      Momentum, participation and directional agreement in one pane.
-    </td>
+    <td width="50%" valign="top"><a href="./docs/indicators/options-levels.md"><img src="./assets/screenshots/options-levels.png" alt="Meridian Options Levels"></a><br><b>Options Levels</b><br>Session and historical references for liquid options underlyings.</td>
+    <td width="50%" valign="top"><a href="./docs/indicators/options-context.md"><img src="./assets/screenshots/options-context.png" alt="Meridian Options Context"></a><br><b>Options Context</b><br>Momentum, participation and directional agreement in a lower pane.</td>
   </tr>
   <tr>
-    <td width="50%" valign="top">
-      <a href="./docs/meridian-futures-levels.md"><img src="./screenshots/Meridian_Futures_Levels.png" alt="Meridian Futures Levels"></a>
-      <br><b>Futures Levels</b><br>
-      RTH/overnight structure, VWAP, OR, IB and confluence zones.
-    </td>
-    <td width="50%" valign="top">
-      <a href="./docs/meridian-futures-context.md"><img src="./screenshots/Meridian_Futures_Context.png" alt="Meridian Futures Context"></a>
-      <br><b>Futures Context</b><br>
-      Participation, volatility, relative strength and regime classification.
-    </td>
+    <td width="50%" valign="top"><a href="./docs/indicators/futures-levels.md"><img src="./assets/screenshots/futures-levels.png" alt="Meridian Futures Levels"></a><br><b>Futures Levels</b><br>Session structure, VWAP, OR, IB and confluence clusters.</td>
+    <td width="50%" valign="top"><a href="./docs/indicators/futures-context.md"><img src="./assets/screenshots/futures-context.png" alt="Meridian Futures Context"></a><br><b>Futures Context</b><br>Participation, volatility, relative strength and regime classification.</td>
   </tr>
   <tr>
-    <td width="50%" valign="top">
-      <a href="./docs/meridian-futures-profile.md"><img src="./screenshots/Meridian_Futures_Profile.png" alt="Meridian Futures Profile"></a>
-      <br><b>Futures Profile</b><br>
-      TPO value, structure, migration and auction-state interpretation.
-    </td>
-    <td width="50%" valign="top">
-      <a href="./docs/meridian-futures-setups.md"><img src="./screenshots/Meridian_Futures_Setups.png" alt="Meridian Futures Setups beta preview"></a>
-      <br><b>Futures Setups — Beta</b><br>
-      Multi-timeframe confluence scoring with separate daily-use and research builds.
-    </td>
+    <td width="50%" valign="top"><a href="./docs/indicators/futures-profile.md"><img src="./assets/screenshots/futures-profile.png" alt="Meridian Futures Profile"></a><br><b>Futures Profile</b><br>TPO value, profile structure and auction-state interpretation.</td>
+    <td width="50%" valign="top"><a href="./docs/indicators/futures-setups.md"><img src="./assets/screenshots/futures-setups.png" alt="Meridian Futures Setups"></a><br><b>Futures Setups</b><br>Confirmed multi-timeframe confluence and trade-hypothesis geometry.</td>
   </tr>
 </table>
 
-## Quick Start
-
-### Install an indicator in TradingView
-
-1. Open the indicator's `.pine` file from the **Source** column above.
-2. Copy the complete source code.
-3. Open a chart in TradingView.
-4. Select **Pine Editor**.
-5. Create a blank indicator and replace its contents with the Meridian source.
-6. Save the script and select **Add to chart**.
-7. Open the indicator settings and confirm the session timezone, market session and display options.
-
-### Download the repository
-
-Use GitHub's **Code** menu to clone the repository or download it as a ZIP. Indicator source files are stored under `indicators/`. Documentation and screenshots are stored under `docs/` and `screenshots/`.
-
-```bash
-git clone https://github.com/YOUR_USERNAME/meridian-indicators.git
-cd meridian-indicators
-```
-
-Replace `YOUR_USERNAME` with the repository owner before publishing this command.
-
-### Update an installed script
-
-TradingView does not automatically update source copied from GitHub.
-
-1. Open the latest source file in this repository.
-2. Review the commit history and changelog.
-3. Copy the updated source.
-4. Replace the source in your saved TradingView script.
-5. Save the script and refresh or re-add it to the chart.
-
-Git commit history and source diffs make each public change reviewable.
-
-## Recommended Chart Setup
-
-### Options indicators
-
-- Apply the scripts to the underlying chart, such as SPY or QQQ, not to an individual option contract.
-- Use standard time-based candles.
-- Typical working timeframes are 1, 2, 3, 5 and 15 minutes.
-- Enable extended hours when premarket levels are required.
-
-### Futures Levels, Context and Profile
-
-- Designed primarily for NQ, ES, MNQ and MES.
-- Use standard candles rather than synthetic chart types.
-- Use the active contract for live execution context. Continuous contracts are convenient for research but can be affected by rollover and back-adjustment.
-- One-minute, five-minute and fifteen-minute charts provide the best alignment for intraday session calculations.
-- Confirm the chart timezone and session configuration when calculations appear offset.
-
-### Futures Setups beta
-
-Use the **daily build** for normal chart use and the **research build** only when you need scoring diagnostics.
-
-Recommended initial configuration:
-
-```text
-Market: NQ or ES
-Timeframe: 1 minute
-Extended hours: enabled
-Signal window: 08:00–16:00 ET
-Minimum score: 80
-Minimum independent categories: 4
-Entry mode: Rejection close
-Require first qualified touch: enabled
-Maximum active trades: 1
-```
-
-The zone engine reads the configured futures session, including overnight and premarket bars. The default signal window begins at 08:00 New York time and can be changed in the settings.
-
-Futures Setups is a **beta and work in progress**. Score weights, zone rules, thresholds and lifecycle behavior can change during validation.
-
-## Suggested Workflows
+## Recommended combinations
 
 ### Options workflow
 
-Use **Options Levels** on the price chart and **Options Context** in a lower pane.
+Apply **Options Levels** to the underlying price chart and **Options Context** in a lower pane. Use the underlying, such as SPY or QQQ, rather than an individual option contract.
 
-- Levels supplies PDH/PDL, premarket, Opening Range and VWAP references.
-- Context shows whether momentum and participation support or conflict with price at those references.
+### Futures workflow
 
-### Futures analysis workflow
+Use **Futures Levels**, **Futures Context** and **Futures Profile** together when you want separate answers to three questions:
 
-Use **Futures Levels**, **Futures Context** and **Futures Profile** together.
+- **Location:** where are the objective references?
+- **Environment:** is the session trending, balancing, expanding or compressing?
+- **Auction:** where is value forming, migrating or failing?
 
-- Levels answers: *Where are the objective references and confluence zones?*
-- Context answers: *Is the session trending, balancing, expanding or compressing?*
-- Profile answers: *Where is value forming, migrating or failing?*
+Use **Futures Setups** independently when you want the beta Meridian Choice qualification engine. The daily and research builds share the same live signal rules; the research build adds diagnostic drawings and outcome counters.
 
-The Profile dashboard includes a layout option intended to stack with the Futures Levels dashboard.
-
-### Futures setup workflow
-
-Use **Futures Setups Daily** when you want a clean Meridian Choice signal scanner.
-
-- The script detects chart, 5-minute, 15-minute, 30-minute, 1-hour and 4-hour FVG, IFVG, OB and BB zones.
-- It evaluates nesting, structure, displacement, liquidity, VWAP, momentum, RVOL, SMT and session context.
-- It selects the strongest qualified zone on each confirmed bar.
-- It produces full BUY/SELL trade geometry only after the live score and lifecycle gates pass.
-
-Use **Futures Setups Research** to inspect active zones, score composition, rejected candidates and score-bucket outcomes. Research visibility does not lower the live threshold and does not convert rejected candidates into trades.
-
-Futures Setups recalculates the information that it requires. It does not directly read the internal object state of Futures Levels, Context or Profile.
-
-## Repository Layout
+## Repository layout
 
 ```text
 meridian-indicators/
-├── README.md
-├── LICENSE
+├── src/
+│   ├── options/                 # Stable options-underlying scripts
+│   └── futures/                 # Stable, preview and beta futures scripts
 ├── docs/
-│   ├── README.md
-│   ├── meridian-options-levels.md
-│   ├── meridian-options-context.md
-│   ├── meridian-futures-levels.md
-│   ├── meridian-futures-context.md
-│   ├── meridian-futures-profile.md
-│   └── meridian-futures-setups.md
-├── indicators/
-│   ├── options/
-│   │   ├── meridian-options-levels/
-│   │   └── meridian-options-context/
-│   └── futures/
-│       ├── meridian-futures-levels/
-│       ├── meridian-futures-context/
-│       ├── meridian-futures-profile/
-│       └── meridian-futures-setups/
-│           ├── meridian-futures-setups-v0.3.0-beta.pine
-│           └── meridian-futures-setups-research-v0.3.0-beta.pine
-└── screenshots/
-    ├── Meridian_Options_Levels.png
-    ├── Meridian_Options_Context.png
-    ├── Meridian_Futures_Levels.png
-    ├── Meridian_Futures_Context.png
-    ├── Meridian_Futures_Profile.png
-    └── Meridian_Futures_Setups.png
+│   ├── indicators/              # One practical guide per indicator
+│   ├── getting-started.md       # Installation and first configuration
+│   ├── architecture.md          # Technical design and boundaries
+│   ├── data-integrity.md        # Confirmation, repainting and data behavior
+│   └── troubleshooting.md       # Common setup and runtime problems
+├── assets/                      # Banner and chart screenshots
+├── tools/validate_repo.py       # Dependency-free static repository checks
+├── manifest.json                # Versions, paths and release status
+├── CHANGELOG.md
+├── CONTRIBUTING.md
+├── SECURITY.md
+├── DISCLAIMER.md
+├── LICENSE
+└── README.md
 ```
 
-## Design Principles
+## Design principles
 
-- **Transparent:** source code and calculation logic are public.
-- **Explainable:** classifications and setup states use documented rules rather than unexplained labels.
-- **Focused:** each indicator has one primary analytical purpose.
+- **Focused:** every script has one primary analytical responsibility.
+- **Explainable:** scores and labels are based on documented rules.
 - **Session-aware:** intraday calculations use explicit market-session boundaries.
-- **Confirmed where required:** completed higher-timeframe values and confirmed pivots are used on critical setup paths.
-- **Stateful:** zones, levels and setup hypotheses progress through explicit lifecycles.
-- **Strategy-neutral:** Futures Setups ranks shared market evidence instead of embedding multiple named playbooks.
-- **Customizable:** sessions, thresholds, visual styles and display density are configurable.
-- **Composable:** each indicator can be used independently or with the Meridian suite.
-- **Bounded:** drawing objects and retained history are limited to respect Pine Script resource constraints.
+- **Confirmed where required:** critical higher-timeframe values use completed source bars.
+- **Bounded:** drawing objects and historical state are capped to respect Pine limits.
+- **Composable:** scripts can be used independently or as a suite.
+- **Private by default:** the scripts contain no credentials and cannot directly transmit chart data. TradingView only sends alert data after a user creates an alert and chooses a delivery destination.
 
-## Documentation
+## Validation
 
-Detailed documentation is available for every current indicator:
+Run the included static checks before opening a pull request:
 
-- [Meridian — Options Levels](./docs/meridian-options-levels.md)
-- [Meridian — Options Context](./docs/meridian-options-context.md)
-- [Meridian — Futures Levels](./docs/meridian-futures-levels.md)
-- [Meridian — Futures Context](./docs/meridian-futures-context.md)
-- [Meridian — Futures Profile](./docs/meridian-futures-profile.md)
-- [Meridian — Futures Setups — Beta](./docs/meridian-futures-setups.md)
+```bash
+python tools/validate_repo.py
+```
 
-The [documentation index](./docs/README.md) provides a compact list of all indicator guides.
+The validator checks the manifest, source headers, local documentation links, balanced delimiters, setup-build parity and common release mistakes. It does **not** replace compiling each script in TradingView or validating it with Bar Replay and live market data.
 
-## Development Status
+## Contributing
 
-The repository is under active development. Public scripts can receive calculation fixes, usability improvements, alerts, documentation changes and visual refinements.
+Bug reports and focused improvements are welcome. Read [CONTRIBUTING.md](./CONTRIBUTING.md) before submitting a change. Calculation changes should include a reproducible chart case, symbol, timeframe, session settings and expected behavior.
 
-**Meridian — Futures Setups v0.3 is a beta and work in progress.** The legacy multi-strategy design was replaced with one strategy-neutral Meridian Choice engine and two separate builds:
+## License and risk notice
 
-- daily use;
-- research and diagnostics.
-
-Validation priorities include Bar Replay timing, live-session observation, score-bucket analysis, multi-timeframe zone accuracy and later Meridian Backtester research.
-
-Review the commit history before updating a script so that you understand what changed. Reproducible chart examples and bug reports are welcome through GitHub Issues once issue tracking is enabled.
-
-## Planned Work
-
-Current research and development areas include:
-
-- Futures Setups score and threshold validation;
-- a dedicated historical research/strategy companion;
-- separate hypothesis-specific indicators such as mean reversion and session-liquidity models;
-- Futures Auction and footprint research;
-- constituent and intermarket pressure models;
-- secure Meridian Intelligence integrations.
-
-## Disclaimer
-
-These indicators are research and market-analysis tools. They do not provide financial advice, guarantee a result, place broker orders or replace independent risk management. Historical references, statistical classifications, setup scores and alerts can fail or become less useful when market structure changes.
-
-Futures Setups uses OHLC bars. Historical bars do not reveal the exact intrabar sequence when a stop and target occur in the same candle. The confluence score is not a probability, win rate or promise of future performance.
-
-<a id="license"></a>
-## License
-
-The source code in this repository is licensed under the [Mozilla Public License 2.0](./LICENSE).
-
-The MPL-2.0 permits use, study, modification and redistribution under its terms. The license applies to covered source code. It does not grant rights to the **Meridian Trading** name, logos, branding, premium products or private infrastructure.
-
----
-
-<p align="center">
-  Developed by <b>Meridian Trading</b>.
-</p>
+Source code is licensed under the [Mozilla Public License 2.0](./LICENSE). See [DISCLAIMER.md](./DISCLAIMER.md) for the trading and market-data notice.
