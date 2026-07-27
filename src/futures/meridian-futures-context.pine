@@ -1,0 +1,651 @@
+//@version=6
+// SPDX-License-Identifier: MPL-2.0
+// Meridian — Futures Context · v0.1.7
+
+indicator(
+     title = "Meridian — Futures Context",
+     shorttitle = "Meridian Futures Context",
+     overlay = false,
+     format = format.price,
+     precision = 2,
+     max_bars_back = 5000,
+     explicit_plot_zorder = true
+ )
+
+const string G_GENERAL = "01 — General"
+const string G_SESSION = "02 — Session + Baselines"
+const string G_RVOL    = "03 — Participation / RVOL"
+const string G_VOL     = "04 — Realized Volatility"
+const string G_VWAP    = "05 — VWAP Context"
+const string G_EMA     = "06 — EMA Structure"
+const string G_TREND   = "07 — Trend Quality"
+const string G_RS      = "08 — Relative Strength"
+const string G_REGIME  = "09 — Regime Engine"
+const string G_PLOTS   = "10 — Supporting Plots"
+const string G_THEME   = "11 — Meridian Theme"
+const string G_DASH    = "12 — Dashboard + Alerts"
+
+bool indicatorEnabled = input.bool(true, "Enable indicator", group = G_GENERAL)
+string sessionTimezone = input.string("America/New_York", "Analysis time zone", group = G_GENERAL,
+     tooltip = "Use an IANA time zone. America/New_York is recommended for CME index futures.")
+bool classifyOutsideRTH = input.bool(false, "Classify outside RTH", group = G_GENERAL,
+     tooltip = "When disabled, the dashboard reports Outside RTH while participation metrics pause. Technical metrics continue calculating.")
+
+string rthSession = input.session("0930-1600:23456", "RTH session", group = G_SESSION)
+int rthOpenHour = input.int(9, "RTH open hour", minval = 0, maxval = 23, inline = "rthopen", group = G_SESSION)
+int rthOpenMinute = input.int(30, "Minute", minval = 0, maxval = 59, inline = "rthopen", group = G_SESSION)
+int baselineSessions = input.int(40, "Historical sessions", minval = 5, maxval = 60, group = G_SESSION,
+     tooltip = "Number of prior sessions retained for each same-time chart slot.")
+int minimumBaselineSamples = input.int(10, "Minimum samples before display", minval = 3, maxval = 40, group = G_SESSION)
+int maximumSupportedMinutes = input.int(30, "Maximum supported chart timeframe", minval = 1, maxval = 60, group = G_SESSION,
+     tooltip = "Same-time RVOL is intended for minute-based intraday charts. 1m, 5m, and 15m are recommended.")
+
+float elevatedRvolThreshold = input.float(1.25, "Elevated bar RVOL", minval = 1.0, maxval = 5.0, step = 0.05, group = G_RVOL)
+float extremeRvolThreshold = input.float(1.75, "Extreme bar RVOL", minval = 1.0, maxval = 10.0, step = 0.05, group = G_RVOL)
+float elevatedCumulativeRvol = input.float(1.15, "Elevated cumulative RVOL", minval = 1.0, maxval = 5.0, step = 0.05, group = G_RVOL)
+float quietRvolThreshold = input.float(0.75, "Quiet RVOL", minval = 0.1, maxval = 1.0, step = 0.05, group = G_RVOL)
+
+int realizedVolLength = input.int(30, "Rolling return window", minval = 5, maxval = 300, group = G_VOL)
+int realizedVolBaselineLength = input.int(150, "Volatility baseline length", minval = 20, maxval = 1000, group = G_VOL)
+int realizedVolZLength = input.int(150, "Volatility z-score length", minval = 20, maxval = 1000, group = G_VOL)
+float volatilityExpansionRatio = input.float(1.20, "Expansion ratio", minval = 1.01, maxval = 5.0, step = 0.05, group = G_VOL)
+float volatilityContractionRatio = input.float(0.80, "Contraction ratio", minval = 0.1, maxval = 0.99, step = 0.05, group = G_VOL)
+
+float vwapSource = input.source(hlc3, "VWAP source", group = G_VWAP)
+int vwapSlopeLookback = input.int(5, "VWAP slope lookback", minval = 1, maxval = 100, group = G_VWAP)
+int vwapCrossLookback = input.int(20, "VWAP crossing lookback", minval = 5, maxval = 200, group = G_VWAP)
+float strongVwapSlopeAtr = input.float(0.12, "Strong VWAP slope (ATR)", minval = 0.01, maxval = 2.0, step = 0.01, group = G_VWAP)
+float vwapRotationZ = input.float(0.55, "Rotation distance (σ)", minval = 0.1, maxval = 3.0, step = 0.05, group = G_VWAP)
+int rotationCrossTarget = input.int(3, "Crosses indicating rotation", minval = 1, maxval = 20, group = G_VWAP)
+
+float emaSource = input.source(close, "EMA source", group = G_EMA)
+int emaFastLength = input.int(9, "Fast EMA", minval = 1, maxval = 200, inline = "emas", group = G_EMA)
+int emaMidLength = input.int(20, "Mid EMA", minval = 2, maxval = 300, inline = "emas", group = G_EMA)
+int emaSlowLength = input.int(50, "Slow EMA", minval = 3, maxval = 500, inline = "emas", group = G_EMA)
+int emaSlopeLookback = input.int(5, "Slope lookback", minval = 1, maxval = 100, group = G_EMA)
+float emaCompressionAtr = input.float(0.18, "Compression spread (ATR)", minval = 0.01, maxval = 3.0, step = 0.01, group = G_EMA)
+float emaExpansionAtr = input.float(0.65, "Expansion spread (ATR)", minval = 0.05, maxval = 5.0, step = 0.05, group = G_EMA)
+
+int atrLength = input.int(14, "ATR length", minval = 2, maxval = 200, group = G_TREND)
+int diLength = input.int(14, "DI length", minval = 2, maxval = 100, inline = "dmi", group = G_TREND)
+int adxSmoothing = input.int(14, "ADX smoothing", minval = 2, maxval = 100, inline = "dmi", group = G_TREND)
+float weakAdx = input.float(17.0, "Weak ADX", minval = 1.0, maxval = 50.0, step = 0.5, inline = "adx", group = G_TREND)
+float strongAdx = input.float(28.0, "Strong ADX", minval = 5.0, maxval = 80.0, step = 0.5, inline = "adx", group = G_TREND)
+int efficiencyLength = input.int(20, "Directional efficiency length", minval = 2, maxval = 300, group = G_TREND)
+float weakEfficiency = input.float(0.22, "Weak efficiency", minval = 0.01, maxval = 0.9, step = 0.01, inline = "eff", group = G_TREND)
+float strongEfficiency = input.float(0.55, "Strong efficiency", minval = 0.05, maxval = 1.0, step = 0.01, inline = "eff", group = G_TREND)
+
+bool enableRelativeStrength = input.bool(true, "Enable relative strength", group = G_RS)
+string relativeAnchorMode = input.string("Auto NQ/ES", "Anchor mode", options = ["Auto NQ/ES", "Custom"], group = G_RS)
+string customRelativeSymbol = input.symbol("CME_MINI:ES1!", "Custom anchor", group = G_RS)
+int relativeHorizon = input.int(5, "Return horizon (bars)", minval = 1, maxval = 100, group = G_RS)
+int betaLength = input.int(100, "Rolling beta length", minval = 20, maxval = 1000, group = G_RS)
+int relativeZLength = input.int(150, "Residual z-score length", minval = 20, maxval = 1000, group = G_RS)
+float relativeDislocationZ = input.float(1.25, "Dislocation threshold (σ)", minval = 0.25, maxval = 5.0, step = 0.05, group = G_RS)
+bool includeRelativeInRegime = input.bool(true, "Use relative strength in regime", group = G_RS)
+
+float directionThreshold = input.float(0.34, "Directional threshold", minval = 0.05, maxval = 0.9, step = 0.01, group = G_REGIME)
+float trendThreshold = input.float(0.54, "Trend-quality threshold", minval = 0.05, maxval = 0.95, step = 0.01, group = G_REGIME)
+float expansionThreshold = input.float(0.56, "Expansion threshold", minval = 0.05, maxval = 0.95, step = 0.01, group = G_REGIME)
+float compressionThreshold = input.float(0.62, "Compression threshold", minval = 0.05, maxval = 0.95, step = 0.01, group = G_REGIME)
+float balanceThreshold = input.float(0.58, "Balance threshold", minval = 0.05, maxval = 0.95, step = 0.01, group = G_REGIME)
+float rangeExpansionRatio = input.float(1.18, "Range expansion ratio", minval = 1.01, maxval = 5.0, step = 0.05, group = G_REGIME)
+float rangeCompressionRatio = input.float(0.78, "Range compression ratio", minval = 0.1, maxval = 0.99, step = 0.05, group = G_REGIME)
+
+bool showBarRvol = input.bool(true, "Show bar RVOL histogram", group = G_PLOTS)
+bool showCumulativeRvol = input.bool(true, "Show cumulative RVOL", group = G_PLOTS)
+bool showRealizedVolRatio = input.bool(true, "Show realized-volatility ratio", group = G_PLOTS)
+bool showRangeRatio = input.bool(false, "Show developing-range ratio", group = G_PLOTS)
+float plotCap = input.float(4.0, "Visual plot cap", minval = 1.5, maxval = 20.0, step = 0.5, group = G_PLOTS,
+     tooltip = "Caps extreme values visually without changing dashboard calculations or alerts.")
+bool showPlotValues = input.bool(false, "Show plot values on scale/status", group = G_PLOTS)
+
+color accentColor = input.color(color.rgb(168, 85, 247), "Meridian accent", group = G_THEME)
+color secondaryColor = input.color(color.rgb(99, 102, 241), "Secondary accent", group = G_THEME)
+color participationColor = input.color(color.rgb(45, 212, 191), "Participation", group = G_THEME)
+color volatilityColor = input.color(color.rgb(244, 114, 182), "Volatility", group = G_THEME)
+color bullishColor = input.color(color.rgb(34, 197, 94), "Bullish", group = G_THEME)
+color bearishColor = input.color(color.rgb(239, 68, 68), "Bearish", group = G_THEME)
+color histogramBullColor = input.color(color.rgb(21, 128, 61), "RVOL positive bars", group = G_THEME)
+color histogramBearColor = input.color(color.rgb(185, 28, 28), "RVOL negative bars", group = G_THEME)
+color warningColor = input.color(color.rgb(245, 158, 11), "Transition / warning", group = G_THEME)
+color neutralColor = input.color(color.rgb(148, 163, 184), "Neutral", group = G_THEME)
+color panelColor = input.color(color.rgb(15, 23, 42), "Dashboard background", group = G_THEME)
+color textColor = input.color(color.rgb(241, 245, 249), "Dashboard text", group = G_THEME)
+int cardTransparency = input.int(78, "Card transparency", minval = 40, maxval = 95, group = G_THEME)
+
+bool showDashboard = input.bool(true, "Show context dashboard", group = G_DASH)
+string dashboardPosition = input.string("Bottom Right", "Dashboard position", options = ["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group = G_DASH)
+string dashboardTextSize = input.string("Normal", "Dashboard text size", options = ["Tiny", "Small", "Normal", "Large"], group = G_DASH)
+int dashboardColumnWidth = input.int(15, "Column width (% of pane)", minval = 10, maxval = 22, group = G_DASH,
+     tooltip = "Each dashboard column uses this percentage of the indicator pane. Two 15% columns occupy roughly the right third of the pane.")
+int dashboardHeaderHeight = input.int(8, "Header height (% of pane)", minval = 4, maxval = 15, group = G_DASH,
+     tooltip = "Dashboard row heights are percentages of the indicator pane. Default total height is approximately 95%.")
+int dashboardCardHeight = input.int(27, "Card-row height (% of pane)", minval = 15, maxval = 30, group = G_DASH,
+     tooltip = "Applied to each of the three card rows. Three 27% rows occupy 81% of the pane.")
+int dashboardFooterHeight = input.int(6, "Footer height (% of pane)", minval = 2, maxval = 10, group = G_DASH)
+bool enableDynamicAlerts = input.bool(false, "Enable dynamic JSON alert() calls", group = G_DASH,
+     tooltip = "Create an alert using Any alert() function call. Events are emitted only on confirmed bars.")
+float alertRvolThreshold = input.float(2.0, "RVOL alert threshold", minval = 1.0, maxval = 20.0, step = 0.1, group = G_DASH)
+float alertVolatilityRatio = input.float(1.40, "Volatility alert threshold", minval = 1.0, maxval = 10.0, step = 0.05, group = G_DASH)
+float alertRelativeZ = input.float(1.75, "Relative-strength alert threshold", minval = 0.5, maxval = 10.0, step = 0.05, group = G_DASH)
+
+f_clamp(float value, float lower, float upper) =>
+    math.max(lower, math.min(upper, value))
+
+f_safe_ratio(float numerator, float denominator) =>
+    not na(numerator) and not na(denominator) and math.abs(denominator) > 1e-12 ? numerator / denominator : na
+
+f_zscore(float source, int length) =>
+    float meanValue = ta.sma(source, length)
+    float deviation = ta.stdev(source, length)
+    not na(deviation) and deviation > 1e-12 ? (source - meanValue) / deviation : na
+
+f_ratio_text(float value) =>
+    na(value) ? "—" : str.tostring(value, "#.##") + "×"
+
+f_number_text(float value, string pattern) =>
+    na(value) ? "—" : str.tostring(value, pattern)
+
+f_signed_text(float value, string pattern) =>
+    na(value) ? "—" : (value > 0.0 ? "+" : "") + str.tostring(value, pattern)
+
+f_table_position(string name) =>
+    switch name
+        "Top Left"     => position.top_left
+        "Bottom Right" => position.bottom_right
+        "Bottom Left"  => position.bottom_left
+        => position.top_right
+
+f_text_size(string name) =>
+    switch name
+        "Tiny"   => size.tiny
+        "Normal" => size.normal
+        "Large"  => size.large
+        => size.small
+
+f_alpha_from_strength(float strength, int lowAlpha, int highAlpha) =>
+    int(math.round(f_clamp(lowAlpha - (lowAlpha - highAlpha) * strength, highAlpha, lowAlpha)))
+
+f_histogram_color(float ratio, float quietThreshold, float elevatedThreshold, float extremeThreshold) =>
+    if na(ratio)
+        color.new(neutralColor, 70)
+    else if ratio >= 1.0
+        float denom = math.max(extremeThreshold - 1.0, 0.01)
+        float strength = f_clamp((ratio - 1.0) / denom, 0.0, 1.0)
+        color.new(histogramBullColor, f_alpha_from_strength(strength, 72, 5))
+    else
+        float denom = math.max(1.0 - quietThreshold, 0.01)
+        float strength = f_clamp((1.0 - ratio) / denom, 0.0, 1.0)
+        color.new(histogramBearColor, f_alpha_from_strength(strength, 72, 8))
+
+f_regime_text(int code) =>
+    switch code
+        2  => "Bull Expansion"
+        1  => "Bull Trend"
+        -1 => "Bear Trend"
+        -2 => "Bear Expansion"
+        3  => "Balanced Rotation"
+        4  => "Compression"
+        5  => "Volatility Expansion"
+        9  => "Outside RTH"
+        => "Transition"
+
+f_regime_color(int code) =>
+    switch code
+        2  => bullishColor
+        1  => bullishColor
+        -1 => bearishColor
+        -2 => bearishColor
+        3  => accentColor
+        4  => neutralColor
+        5  => volatilityColor
+        9  => neutralColor
+        => warningColor
+
+bool inRTH = not na(time(timeframe.period, rthSession, sessionTimezone))
+int localYear = year(time, sessionTimezone)
+int localMonth = month(time, sessionTimezone)
+int localDay = dayofmonth(time, sessionTimezone)
+int rthDateKey = localYear * 10000 + localMonth * 100 + localDay
+bool newRTH = inRTH and (not inRTH[1] or rthDateKey != rthDateKey[1])
+
+float timeframeSeconds = timeframe.in_seconds()
+int timeframeMinutes = timeframe.isintraday ? int(math.round(timeframeSeconds / 60.0)) : 0
+bool supportedTimeframe = timeframe.isintraday and timeframeSeconds >= 60.0 and timeframeMinutes <= maximumSupportedMinutes
+int timeframeMilliseconds = supportedTimeframe ? int(timeframeSeconds * 1000.0) : 0
+int rthStartTimestamp = timestamp(sessionTimezone, localYear, localMonth, localDay, rthOpenHour, rthOpenMinute)
+int currentSlot = inRTH and supportedTimeframe and timeframeMilliseconds > 0 ? int(math.floor((time - rthStartTimestamp) / timeframeMilliseconds)) : -1
+
+const int MAX_RTH_SLOTS = 500
+bool validSlot = currentSlot >= 0 and currentSlot < MAX_RTH_SLOTS
+
+var float[] slotVolumeHistory = array.new_float(MAX_RTH_SLOTS * baselineSessions, na)
+var float[] slotRangeHistory = array.new_float(MAX_RTH_SLOTS * baselineSessions, na)
+var float[] slotVolumeSums = array.new_float(MAX_RTH_SLOTS, 0.0)
+var float[] slotRangeSums = array.new_float(MAX_RTH_SLOTS, 0.0)
+var int[] slotSampleCounts = array.new_int(MAX_RTH_SLOTS, 0)
+var int[] slotWriteIndices = array.new_int(MAX_RTH_SLOTS, 0)
+
+int slotSamples = validSlot ? array.get(slotSampleCounts, currentSlot) : 0
+float slotVolumeAverage = validSlot and slotSamples > 0 ? array.get(slotVolumeSums, currentSlot) / slotSamples : na
+float slotRangeAverage = validSlot and slotSamples > 0 ? array.get(slotRangeSums, currentSlot) / slotSamples : na
+bool baselineReady = validSlot and slotSamples >= minimumBaselineSamples
+
+var float rthOpen = na
+var float rthHigh = na
+var float rthLow = na
+var float sessionCumulativeVolume = 0.0
+var float expectedCumulativeVolume = 0.0
+var int rthSessionsObserved = 0
+
+if newRTH
+    rthSessionsObserved += 1
+    rthOpen := open
+    rthHigh := high
+    rthLow := low
+    sessionCumulativeVolume := nz(volume, 0.0)
+    expectedCumulativeVolume := nz(slotVolumeAverage, 0.0)
+else if inRTH
+    rthHigh := na(rthHigh) ? high : math.max(rthHigh, high)
+    rthLow := na(rthLow) ? low : math.min(rthLow, low)
+    sessionCumulativeVolume += nz(volume, 0.0)
+    expectedCumulativeVolume += nz(slotVolumeAverage, 0.0)
+
+float developingRange = inRTH and not na(rthHigh) and not na(rthLow) ? rthHigh - rthLow : na
+float barRvol = inRTH and baselineReady ? f_safe_ratio(nz(volume, 0.0), slotVolumeAverage) : na
+float cumulativeRvol = inRTH and baselineReady and expectedCumulativeVolume > 0.0 ? sessionCumulativeVolume / expectedCumulativeVolume : na
+float developingRangeRatio = inRTH and baselineReady ? f_safe_ratio(developingRange, slotRangeAverage) : na
+
+if barstate.isconfirmed and inRTH and validSlot
+    int writeIndex = array.get(slotWriteIndices, currentSlot)
+    int historyIndex = currentSlot * baselineSessions + writeIndex
+    int existingCount = array.get(slotSampleCounts, currentSlot)
+    float oldVolume = array.get(slotVolumeHistory, historyIndex)
+    float oldRange = array.get(slotRangeHistory, historyIndex)
+    float currentVolumeValue = nz(volume, 0.0)
+    float currentRangeValue = nz(developingRange, 0.0)
+
+    if existingCount < baselineSessions
+        array.set(slotVolumeHistory, historyIndex, currentVolumeValue)
+        array.set(slotRangeHistory, historyIndex, currentRangeValue)
+        array.set(slotVolumeSums, currentSlot, array.get(slotVolumeSums, currentSlot) + currentVolumeValue)
+        array.set(slotRangeSums, currentSlot, array.get(slotRangeSums, currentSlot) + currentRangeValue)
+        array.set(slotSampleCounts, currentSlot, existingCount + 1)
+    else
+        array.set(slotVolumeHistory, historyIndex, currentVolumeValue)
+        array.set(slotRangeHistory, historyIndex, currentRangeValue)
+        array.set(slotVolumeSums, currentSlot, array.get(slotVolumeSums, currentSlot) - nz(oldVolume, 0.0) + currentVolumeValue)
+        array.set(slotRangeSums, currentSlot, array.get(slotRangeSums, currentSlot) - nz(oldRange, 0.0) + currentRangeValue)
+
+    array.set(slotWriteIndices, currentSlot, (writeIndex + 1) % baselineSessions)
+
+var float vwapCumulativeVolume = 0.0
+var float vwapCumulativePV = 0.0
+var float vwapCumulativeP2V = 0.0
+
+if newRTH
+    vwapCumulativeVolume := 0.0
+    vwapCumulativePV := 0.0
+    vwapCumulativeP2V := 0.0
+
+if inRTH
+    float vwapBarVolume = nz(volume, 0.0)
+    vwapCumulativeVolume += vwapBarVolume
+    vwapCumulativePV += vwapSource * vwapBarVolume
+    vwapCumulativeP2V += vwapSource * vwapSource * vwapBarVolume
+
+float rthVwap = vwapCumulativeVolume > 0.0 ? vwapCumulativePV / vwapCumulativeVolume : na
+float vwapVariance = vwapCumulativeVolume > 0.0 and not na(rthVwap) ? math.max(vwapCumulativeP2V / vwapCumulativeVolume - rthVwap * rthVwap, 0.0) : na
+float vwapDeviation = math.sqrt(vwapVariance)
+float vwapZ = inRTH and not na(vwapDeviation) and vwapDeviation > syminfo.mintick ? (close - rthVwap) / vwapDeviation : na
+
+float atr = ta.atr(atrLength)
+float emaFast = ta.ema(emaSource, emaFastLength)
+float emaMid = ta.ema(emaSource, emaMidLength)
+float emaSlow = ta.ema(emaSource, emaSlowLength)
+float emaMaximum = math.max(emaFast, math.max(emaMid, emaSlow))
+float emaMinimum = math.min(emaFast, math.min(emaMid, emaSlow))
+float emaSpreadAtrValue = not na(atr) and atr > 0.0 ? (emaMaximum - emaMinimum) / atr : na
+float emaFastSlopeAtr = not na(atr) and atr > 0.0 ? (emaFast - emaFast[emaSlopeLookback]) / atr : na
+
+bool emaBullStack = emaFast > emaMid and emaMid > emaSlow
+bool emaBearStack = emaFast < emaMid and emaMid < emaSlow
+bool emaCompressed = not na(emaSpreadAtrValue) and emaSpreadAtrValue <= emaCompressionAtr
+bool emaExpanded = not na(emaSpreadAtrValue) and emaSpreadAtrValue >= emaExpansionAtr
+
+string emaState = emaCompressed ? "Compressed" :
+     emaBullStack and emaExpanded and emaFastSlopeAtr > 0.0 ? "Bull Expansion" :
+     emaBearStack and emaExpanded and emaFastSlopeAtr < 0.0 ? "Bear Expansion" :
+     emaBullStack and close < emaFast and close >= emaMid ? "Bull Pullback" :
+     emaBearStack and close > emaFast and close <= emaMid ? "Bear Pullback" :
+     emaBullStack ? "Bull Stack" :
+     emaBearStack ? "Bear Stack" : "Tangled"
+
+[plusDI, minusDI, adx] = ta.dmi(diLength, adxSmoothing)
+float totalPath = ta.sma(math.abs(ta.change(close)), efficiencyLength) * efficiencyLength
+float directionalEfficiency = not na(totalPath) and totalPath > 0.0 ? math.abs(close - close[efficiencyLength]) / totalPath : na
+
+float logReturn = close > 0.0 and close[1] > 0.0 ? math.log(close / close[1]) : 0.0
+float realizedVariance = ta.sma(logReturn * logReturn, realizedVolLength) * realizedVolLength
+float realizedVolatility = math.sqrt(math.max(nz(realizedVariance, 0.0), 0.0))
+float realizedVolBaseline = ta.ema(realizedVolatility, realizedVolBaselineLength)
+float realizedVolRatio = f_safe_ratio(realizedVolatility, realizedVolBaseline)
+float realizedVolZ = f_zscore(realizedVolatility, realizedVolZLength)
+
+float vwapSlopeAtrValue = inRTH and validSlot and currentSlot >= vwapSlopeLookback and not na(atr) and atr > 0.0 ? (rthVwap - rthVwap[vwapSlopeLookback]) / atr : na
+bool rawVwapCross = ta.cross(close, rthVwap)
+float vwapCrossSeries = inRTH and rawVwapCross ? 1.0 : 0.0
+float vwapCrossCount = ta.sma(vwapCrossSeries, vwapCrossLookback) * vwapCrossLookback
+
+bool vwapRotating = inRTH and not na(vwapZ) and math.abs(vwapZ) <= vwapRotationZ and vwapCrossCount >= rotationCrossTarget
+string vwapState = not inRTH or na(rthVwap) ? "Inactive" :
+     vwapRotating ? "Rotating" :
+     close > rthVwap and nz(vwapSlopeAtrValue) > 0.0 ? "Above · Rising" :
+     close < rthVwap and nz(vwapSlopeAtrValue) < 0.0 ? "Below · Falling" :
+     close > rthVwap ? "Above VWAP" : "Below VWAP"
+
+bool chartIsNasdaqFuture = syminfo.root == "NQ" or syminfo.root == "MNQ"
+bool chartIsSpFuture = syminfo.root == "ES" or syminfo.root == "MES"
+string automaticRelativeSymbol = chartIsNasdaqFuture ? "CME_MINI:ES1!" : chartIsSpFuture ? "CME_MINI:NQ1!" : customRelativeSymbol
+string relativeSymbol = relativeAnchorMode == "Auto NQ/ES" ? automaticRelativeSymbol : customRelativeSymbol
+
+float anchorClose = request.security(
+     relativeSymbol,
+     timeframe.period,
+     close,
+     gaps = barmerge.gaps_off,
+     lookahead = barmerge.lookahead_off,
+     ignore_invalid_symbol = true)
+
+float chartOneBarReturn = close > 0.0 and close[1] > 0.0 ? math.log(close / close[1]) : na
+float anchorOneBarReturn = anchorClose > 0.0 and anchorClose[1] > 0.0 ? math.log(anchorClose / anchorClose[1]) : na
+float returnCorrelation = ta.correlation(chartOneBarReturn, anchorOneBarReturn, betaLength)
+float chartReturnDeviation = ta.stdev(chartOneBarReturn, betaLength)
+float anchorReturnDeviation = ta.stdev(anchorOneBarReturn, betaLength)
+float rollingBeta = not na(returnCorrelation) and not na(anchorReturnDeviation) and anchorReturnDeviation > 1e-12 ? returnCorrelation * chartReturnDeviation / anchorReturnDeviation : na
+float chartHorizonReturn = close > 0.0 and close[relativeHorizon] > 0.0 ? math.log(close / close[relativeHorizon]) : na
+float anchorHorizonReturn = anchorClose > 0.0 and anchorClose[relativeHorizon] > 0.0 ? math.log(anchorClose / anchorClose[relativeHorizon]) : na
+float relativeResidual = not na(rollingBeta) ? chartHorizonReturn - rollingBeta * anchorHorizonReturn : na
+float relativeZ = f_zscore(relativeResidual, relativeZLength)
+bool relativeReady = enableRelativeStrength and not na(relativeZ)
+
+string relativeState = not enableRelativeStrength ? "Disabled" :
+     not relativeReady ? "Warming Up" :
+     relativeZ >= relativeDislocationZ ? "Leading" :
+     relativeZ <= -relativeDislocationZ ? "Lagging" : "In Line"
+
+float emaDirection = emaBullStack ? 1.0 : emaBearStack ? -1.0 : close >= emaMid ? 0.25 : -0.25
+float vwapDirection = inRTH and not na(rthVwap) ?
+     (close >= rthVwap ? 0.60 : -0.60) + (nz(vwapSlopeAtrValue) > 0.02 ? 0.40 : nz(vwapSlopeAtrValue) < -0.02 ? -0.40 : 0.0) : 0.0
+float diDirection = plusDI > minusDI ? 0.70 : plusDI < minusDI ? -0.70 : 0.0
+float efficiencyDirection = not na(directionalEfficiency) ?
+     directionalEfficiency * (close >= close[efficiencyLength] ? 0.70 : -0.70) : 0.0
+float relativeDirection = includeRelativeInRegime and relativeReady ? f_clamp(relativeZ / 2.5, -0.45, 0.45) : 0.0
+float openDirection = inRTH and not na(rthOpen) ? (close >= rthOpen ? 0.35 : -0.35) : 0.0
+float directionRaw = emaDirection + vwapDirection + diDirection + efficiencyDirection + relativeDirection + openDirection
+float directionMaximum = 4.20
+float directionScore = f_clamp(directionRaw / directionMaximum, -1.0, 1.0)
+
+float adxScore = f_clamp((adx - weakAdx) / math.max(strongAdx - weakAdx, 0.1), 0.0, 1.0)
+float efficiencyScore = f_clamp((nz(directionalEfficiency) - weakEfficiency) / math.max(strongEfficiency - weakEfficiency, 0.01), 0.0, 1.0)
+float emaSeparationScore = f_clamp(nz(emaSpreadAtrValue) / math.max(emaExpansionAtr, 0.01), 0.0, 1.0)
+float vwapSlopeScore = f_clamp(math.abs(nz(vwapSlopeAtrValue)) / math.max(strongVwapSlopeAtr, 0.01), 0.0, 1.0)
+float trendQualityScore = adxScore * 0.35 + efficiencyScore * 0.30 + emaSeparationScore * 0.20 + vwapSlopeScore * 0.15
+
+float volatilityExpansionScore = f_clamp((nz(realizedVolRatio) - 1.0) / math.max(volatilityExpansionRatio - 1.0, 0.01), 0.0, 1.0)
+float rangeExpansionScore = f_clamp((nz(developingRangeRatio) - 1.0) / math.max(rangeExpansionRatio - 1.0, 0.01), 0.0, 1.0)
+float cumulativeParticipationScore = f_clamp((nz(cumulativeRvol) - 1.0) / math.max(elevatedCumulativeRvol - 1.0, 0.01), 0.0, 1.0)
+float barParticipationScore = f_clamp((nz(barRvol) - 1.0) / math.max(elevatedRvolThreshold - 1.0, 0.01), 0.0, 1.0)
+
+float expansionNumerator = volatilityExpansionScore * 0.35
+float expansionDenominator = 0.35
+if not na(developingRangeRatio)
+    expansionNumerator += rangeExpansionScore * 0.30
+    expansionDenominator += 0.30
+if not na(cumulativeRvol)
+    expansionNumerator += cumulativeParticipationScore * 0.20
+    expansionDenominator += 0.20
+if not na(barRvol)
+    expansionNumerator += barParticipationScore * 0.15
+    expansionDenominator += 0.15
+float expansionScore = expansionDenominator > 0.0 ? expansionNumerator / expansionDenominator : 0.0
+
+float emaCompressionScore = 1.0 - f_clamp(nz(emaSpreadAtrValue) / math.max(emaCompressionAtr, 0.01), 0.0, 1.0)
+float adxCompressionScore = 1.0 - f_clamp(adx / math.max(weakAdx, 0.1), 0.0, 1.0)
+float volatilityCompressionScore = 1.0 - f_clamp((nz(realizedVolRatio) - 0.55) / math.max(1.0 - 0.55, 0.01), 0.0, 1.0)
+float rangeCompressionScore = not na(developingRangeRatio) ? 1.0 - f_clamp((developingRangeRatio - 0.45) / math.max(rangeCompressionRatio - 0.45, 0.01), 0.0, 1.0) : 0.0
+float efficiencyCompressionScore = 1.0 - f_clamp(nz(directionalEfficiency) / math.max(weakEfficiency, 0.01), 0.0, 1.0)
+float compressionScore = emaCompressionScore * 0.30 + adxCompressionScore * 0.20 + volatilityCompressionScore * 0.20 + rangeCompressionScore * 0.15 + efficiencyCompressionScore * 0.15
+
+float crossRotationScore = f_clamp(vwapCrossCount / math.max(rotationCrossTarget, 1), 0.0, 1.0)
+float vwapNearScore = 1.0 - f_clamp(math.abs(nz(vwapZ)) / 1.50, 0.0, 1.0)
+float lowEfficiencyScore = 1.0 - f_clamp(nz(directionalEfficiency) / math.max(strongEfficiency, 0.01), 0.0, 1.0)
+float lowDirectionScore = 1.0 - math.abs(directionScore)
+float balanceScore = crossRotationScore * 0.30 + vwapNearScore * 0.25 + lowEfficiencyScore * 0.25 + lowDirectionScore * 0.20
+
+bool directionalEnvironment = math.abs(directionScore) >= directionThreshold
+bool trendingEnvironment = trendQualityScore >= trendThreshold and directionalEnvironment
+bool expandingEnvironment = expansionScore >= expansionThreshold
+bool compressingEnvironment = compressionScore >= compressionThreshold
+bool balancedEnvironment = balanceScore >= balanceThreshold
+
+int regimeCode = 0
+if not inRTH and not classifyOutsideRTH
+    regimeCode := 9
+else if compressingEnvironment and not expandingEnvironment
+    regimeCode := 4
+else if expandingEnvironment and directionalEnvironment
+    regimeCode := directionScore > 0.0 ? 2 : -2
+else if trendingEnvironment
+    regimeCode := directionScore > 0.0 ? 1 : -1
+else if balancedEnvironment
+    regimeCode := 3
+else if expandingEnvironment
+    regimeCode := 5
+else
+    regimeCode := 0
+
+float maximumCompetingScore = math.max(trendQualityScore, math.max(expansionScore, math.max(compressionScore, balanceScore)))
+float regimeAgreement = switch regimeCode
+    2  => (expansionScore + trendQualityScore + math.abs(directionScore)) / 3.0
+    -2 => (expansionScore + trendQualityScore + math.abs(directionScore)) / 3.0
+    1  => (trendQualityScore + math.abs(directionScore) + (1.0 - balanceScore)) / 3.0
+    -1 => (trendQualityScore + math.abs(directionScore) + (1.0 - balanceScore)) / 3.0
+    3  => balanceScore
+    4  => compressionScore
+    5  => expansionScore
+    9  => 1.0
+    => f_clamp(1.20 - maximumCompetingScore, 0.35, 0.72)
+int regimeConfidence = int(math.round(f_clamp(regimeAgreement, 0.0, 1.0) * 100.0))
+string regimeText = f_regime_text(regimeCode)
+color regimeColor = f_regime_color(regimeCode)
+
+string participationState = not inRTH ? "Inactive" :
+     not baselineReady ? "Warming Up" :
+     nz(barRvol) >= extremeRvolThreshold ? "Extreme" :
+     nz(barRvol) >= elevatedRvolThreshold or nz(cumulativeRvol) >= elevatedCumulativeRvol ? "Elevated" :
+     nz(barRvol) <= quietRvolThreshold and nz(cumulativeRvol) <= quietRvolThreshold ? "Quiet" : "Normal"
+
+string volatilityState = na(realizedVolRatio) ? "Warming Up" :
+     realizedVolRatio >= volatilityExpansionRatio ? "Expanding" :
+     realizedVolRatio <= volatilityContractionRatio ? "Contracting" : "Normal"
+
+string trendStrengthState = adx >= strongAdx ? "Strong" : adx <= weakAdx ? "Weak" : "Moderate"
+string rangeState = not inRTH ? "Inactive" :
+     not baselineReady ? "Warming Up" :
+     nz(developingRangeRatio) >= rangeExpansionRatio ? "Expanded" :
+     nz(developingRangeRatio) <= rangeCompressionRatio ? "Compressed" : "Normal"
+
+int localMinutes = hour(time, sessionTimezone) * 60 + minute(time, sessionTimezone)
+string sessionPhase = not inRTH ? "Outside RTH" :
+     localMinutes < 600 ? "Opening Drive" :
+     localMinutes < 660 ? "Price Discovery" :
+     localMinutes < 840 ? "Midday" :
+     localMinutes < 900 ? "Late Session" : "Power Hour"
+
+string relativeDetail = not relativeReady ? "No baseline" : f_signed_text(relativeZ, "#.##") + "σ · β " + f_number_text(rollingBeta, "#.##")
+string participationDetail = "Bar " + f_ratio_text(barRvol) + " · Cum " + f_ratio_text(cumulativeRvol)
+string volatilityDetail = "RV " + f_ratio_text(realizedVolRatio) + " · Z " + f_signed_text(realizedVolZ, "#.##")
+string trendDetail = "ADX " + f_number_text(adx, "#.0") + " · Eff " + f_number_text(directionalEfficiency, "#.##")
+string locationDetail = "VWAP Z " + f_signed_text(vwapZ, "#.##") + " · Range " + f_ratio_text(developingRangeRatio)
+string regimeDetail = "Bias " + f_signed_text(directionScore * 100.0, "#.0") + " · Confidence " + str.tostring(regimeConfidence) + "%"
+
+float cappedBarRvol = na(barRvol) ? na : math.min(barRvol, plotCap)
+float cappedCumulativeRvol = na(cumulativeRvol) ? na : math.min(cumulativeRvol, plotCap)
+float cappedRealizedVolRatio = na(realizedVolRatio) ? na : math.min(realizedVolRatio, plotCap)
+float cappedRangeRatio = na(developingRangeRatio) ? na : math.min(developingRangeRatio, plotCap)
+
+color barRvolColor = f_histogram_color(barRvol, quietRvolThreshold, elevatedRvolThreshold, extremeRvolThreshold)
+contextPlotDisplay = showPlotValues ? display.all : display.all - display.price_scale - display.status_line
+plot(indicatorEnabled and showBarRvol ? cappedBarRvol : na, "Same-time Bar RVOL", color = barRvolColor, linewidth = 1, style = plot.style_columns, histbase = 1.0, display = contextPlotDisplay)
+plot(indicatorEnabled and showCumulativeRvol ? cappedCumulativeRvol : na, "Cumulative RVOL", color = participationColor, linewidth = 2, style = plot.style_line, display = contextPlotDisplay)
+plot(indicatorEnabled and showRealizedVolRatio ? cappedRealizedVolRatio : na, "Realized Volatility Ratio", color = volatilityColor, linewidth = 2, style = plot.style_line, display = contextPlotDisplay)
+plot(indicatorEnabled and showRangeRatio ? cappedRangeRatio : na, "Developing Range Ratio", color = secondaryColor, linewidth = 1, style = plot.style_line, display = contextPlotDisplay)
+hline(1.0, "Normal Baseline", color = color.new(neutralColor, 55), linestyle = hline.style_dotted, linewidth = 1)
+
+plot(directionScore, "Regime Direction Score", color = na, display = display.data_window)
+plot(trendQualityScore, "Trend Quality Score", color = na, display = display.data_window)
+plot(expansionScore, "Expansion Score", color = na, display = display.data_window)
+plot(compressionScore, "Compression Score", color = na, display = display.data_window)
+plot(balanceScore, "Balance Score", color = na, display = display.data_window)
+plot(relativeZ, "Relative Residual Z", color = na, display = display.data_window)
+plot(vwapZ, "VWAP Z", color = na, display = display.data_window)
+plot(emaSpreadAtrValue, "EMA Spread / ATR", color = na, display = display.data_window)
+plot(directionalEfficiency, "Directional Efficiency", color = na, display = display.data_window)
+plot(adx, "ADX", color = na, display = display.data_window)
+
+var table dashboard = table.new(
+     f_table_position(dashboardPosition),
+     2,
+     5,
+     bgcolor = color.new(panelColor, 100),
+     frame_color = color.new(accentColor, 100),
+     frame_width = 1,
+     border_color = color.new(neutralColor, 100),
+     border_width = 1)
+
+if barstate.isfirst
+    table.merge_cells(dashboard, 0, 0, 1, 0)
+    table.merge_cells(dashboard, 0, 4, 1, 4)
+
+if barstate.islast
+    bool dashboardVisible = indicatorEnabled and showDashboard
+    color invisiblePanel = color.new(panelColor, 100)
+    color visiblePanel = color.new(panelColor, 10)
+    color dashboardBackground = dashboardVisible ? visiblePanel : invisiblePanel
+    color dashboardFrame = dashboardVisible ? color.new(accentColor, 32) : color.new(accentColor, 100)
+    color dashboardBorder = dashboardVisible ? color.new(neutralColor, 82) : color.new(neutralColor, 100)
+    color dashboardText = dashboardVisible ? textColor : color.new(textColor, 100)
+    color dashboardMuted = dashboardVisible ? color.new(textColor, 28) : color.new(textColor, 100)
+    string headerText = "MERIDIAN  —  FUTURES CONTEXT"
+    string footerText = supportedTimeframe ? sessionPhase + " · " + timeframe.period + " · Samples " + str.tostring(slotSamples) + "/" + str.tostring(baselineSessions) : "Unsupported timeframe for same-time RVOL · Use 1m, 5m, or 15m"
+
+    table.set_bgcolor(dashboard, dashboardBackground)
+    table.set_frame_color(dashboard, dashboardFrame)
+    table.set_border_color(dashboard, dashboardBorder)
+
+    table.cell(dashboard, 0, 0, headerText,
+         width = dashboardColumnWidth * 2,
+         height = dashboardHeaderHeight,
+         bgcolor = dashboardVisible ? color.new(accentColor, 16) : color.new(accentColor, 100),
+         text_color = dashboardText,
+         text_size = f_text_size(dashboardTextSize),
+         text_halign = text.align_center)
+
+    color participationCardColor = participationState == "Extreme" ? volatilityColor : participationState == "Elevated" ? participationColor : participationState == "Quiet" ? neutralColor : accentColor
+    color volatilityCardColor = volatilityState == "Expanding" ? volatilityColor : volatilityState == "Contracting" ? secondaryColor : neutralColor
+    color emaCardColor = str.contains(emaState, "Bull") ? bullishColor : str.contains(emaState, "Bear") ? bearishColor : emaCompressed ? neutralColor : warningColor
+    color relativeCardColor = relativeState == "Leading" ? bullishColor : relativeState == "Lagging" ? bearishColor : neutralColor
+    color locationCardColor = str.contains(vwapState, "Above") ? bullishColor : str.contains(vwapState, "Below") ? bearishColor : vwapRotating ? accentColor : neutralColor
+
+    table.cell(dashboard, 0, 1, "REGIME\n" + regimeText + "\n" + regimeDetail,
+         width = dashboardColumnWidth,
+         height = dashboardCardHeight,
+         bgcolor = dashboardVisible ? color.new(regimeColor, cardTransparency) : invisiblePanel,
+         text_color = dashboardText,
+         text_size = f_text_size(dashboardTextSize),
+         text_halign = text.align_left,
+         text_valign = text.align_center)
+
+    table.cell(dashboard, 1, 1, "PARTICIPATION\n" + participationState + "\n" + participationDetail,
+         width = dashboardColumnWidth,
+         height = dashboardCardHeight,
+         bgcolor = dashboardVisible ? color.new(participationCardColor, cardTransparency) : invisiblePanel,
+         text_color = dashboardText,
+         text_size = f_text_size(dashboardTextSize),
+         text_halign = text.align_left,
+         text_valign = text.align_center)
+
+    table.cell(dashboard, 0, 2, "TREND STRUCTURE\n" + emaState + " · " + trendStrengthState + "\n" + trendDetail,
+         width = dashboardColumnWidth,
+         height = dashboardCardHeight,
+         bgcolor = dashboardVisible ? color.new(emaCardColor, cardTransparency) : invisiblePanel,
+         text_color = dashboardText,
+         text_size = f_text_size(dashboardTextSize),
+         text_halign = text.align_left,
+         text_valign = text.align_center)
+
+    table.cell(dashboard, 1, 2, "VOLATILITY\n" + volatilityState + "\n" + volatilityDetail,
+         width = dashboardColumnWidth,
+         height = dashboardCardHeight,
+         bgcolor = dashboardVisible ? color.new(volatilityCardColor, cardTransparency) : invisiblePanel,
+         text_color = dashboardText,
+         text_size = f_text_size(dashboardTextSize),
+         text_halign = text.align_left,
+         text_valign = text.align_center)
+
+    table.cell(dashboard, 0, 3, "RELATIVE STRENGTH\n" + relativeState + "\n" + relativeDetail,
+         width = dashboardColumnWidth,
+         height = dashboardCardHeight,
+         bgcolor = dashboardVisible ? color.new(relativeCardColor, cardTransparency) : invisiblePanel,
+         text_color = dashboardText,
+         text_size = f_text_size(dashboardTextSize),
+         text_halign = text.align_left,
+         text_valign = text.align_center)
+
+    table.cell(dashboard, 1, 3, "LOCATION / RANGE\n" + vwapState + " · " + rangeState + "\n" + locationDetail,
+         width = dashboardColumnWidth,
+         height = dashboardCardHeight,
+         bgcolor = dashboardVisible ? color.new(locationCardColor, cardTransparency) : invisiblePanel,
+         text_color = dashboardText,
+         text_size = f_text_size(dashboardTextSize),
+         text_halign = text.align_left,
+         text_valign = text.align_center)
+
+    table.cell(dashboard, 0, 4, footerText,
+         width = dashboardColumnWidth * 2,
+         height = dashboardFooterHeight,
+         bgcolor = dashboardVisible ? color.new(panelColor, 18) : invisiblePanel,
+         text_color = supportedTimeframe ? dashboardMuted : dashboardVisible ? warningColor : color.new(warningColor, 100),
+         text_size = size.small,
+         text_halign = text.align_center)
+
+bool regimeChanged = barstate.isconfirmed and inRTH and regimeCode != regimeCode[1]
+bool rvolSpike = barstate.isconfirmed and inRTH and not na(barRvol) and barRvol >= alertRvolThreshold and nz(barRvol[1], 0.0) < alertRvolThreshold
+bool volatilityExpansionEvent = barstate.isconfirmed and not na(realizedVolRatio) and realizedVolRatio >= alertVolatilityRatio and nz(realizedVolRatio[1], 0.0) < alertVolatilityRatio
+bool relativeDislocationEvent = barstate.isconfirmed and relativeReady and math.abs(relativeZ) >= alertRelativeZ and math.abs(nz(relativeZ[1], 0.0)) < alertRelativeZ
+
+string dynamicEvent = regimeChanged ? "regime_change" : rvolSpike ? "rvol_spike" : volatilityExpansionEvent ? "volatility_expansion" : relativeDislocationEvent ? "relative_dislocation" : ""
+
+if enableDynamicAlerts and str.length(dynamicEvent) > 0
+    string jsonMessage = "{" +
+         "\"source\":\"meridian_futures_context\"," +
+         "\"version\":\"0.1.5\"," +
+         "\"event\":\"" + dynamicEvent + "\"," +
+         "\"symbol\":\"" + syminfo.tickerid + "\"," +
+         "\"timeframe\":\"" + timeframe.period + "\"," +
+         "\"regime\":\"" + regimeText + "\"," +
+         "\"confidence\":" + str.tostring(regimeConfidence) + "," +
+         "\"direction_score\":" + str.tostring(directionScore, "#.####") + "," +
+         "\"bar_rvol\":" + str.tostring(nz(barRvol), "#.####") + "," +
+         "\"cumulative_rvol\":" + str.tostring(nz(cumulativeRvol), "#.####") + "," +
+         "\"realized_vol_ratio\":" + str.tostring(nz(realizedVolRatio), "#.####") + "," +
+         "\"relative_z\":" + str.tostring(nz(relativeZ), "#.####") + "," +
+         "\"bar_time\":" + str.tostring(time) + "}"
+    alert(jsonMessage, alert.freq_once_per_bar_close)
+
+alertcondition(regimeChanged, "Meridian — Futures regime changed", "Meridian Futures Context: the confirmed RTH regime changed.")
+alertcondition(rvolSpike, "Meridian — Same-time RVOL spike", "Meridian Futures Context: same-time bar RVOL crossed the configured alert threshold.")
+alertcondition(volatilityExpansionEvent, "Meridian — Realized volatility expansion", "Meridian Futures Context: rolling realized volatility crossed the configured expansion alert threshold.")
+alertcondition(relativeDislocationEvent, "Meridian — Relative-strength dislocation", "Meridian Futures Context: the beta-adjusted relative residual crossed the configured z-score threshold.")

@@ -1,0 +1,1483 @@
+//@version=6
+// SPDX-License-Identifier: MPL-2.0
+// Meridian — Futures Setups · v0.3.6-beta
+
+indicator(
+     "Meridian — Futures Setups",
+     shorttitle = "Meridian Futures Setups",
+     overlay = true,
+     max_bars_back = 5000,
+     max_lines_count = 500,
+     max_boxes_count = 500,
+     max_labels_count = 500,
+     dynamic_requests = true)
+
+const string VERSION = "0.3.6-beta"
+const bool RESEARCH_BUILD = false
+const int DIR_BULL = 1
+const int DIR_BEAR = -1
+const int DIR_NONE = 0
+
+const int Z_ACTIVE = 0
+const int Z_TRIGGERED = 1
+const int Z_INVALID = 2
+const int Z_EXPIRED = 3
+
+const int T_ACTIVE = 0
+const int T_COMPLETED = 1
+const int T_STOPPED = 2
+const int T_EXPIRED = 3
+
+const int MAX_ZONES = 140
+const int MAX_PIVOTS = 60
+const int MAX_TRADES = 20
+const int MAX_SESSION_SLOTS = 1500
+const int MAX_RVOL_SESSIONS = 60
+const int MAX_LIQUIDITY_POOLS = 24
+const int POOL_SUPPORT = 1
+const int POOL_RESISTANCE = -1
+
+type Zone
+    string id
+    string zoneType
+    string sourceTf
+    int sourceRank
+    int direction
+    float top
+    float bottom
+    float midpoint
+    float sourceAtr
+    int originTime
+    int detectedTime
+    int detectedBar
+    int expiryTime
+    float lifetimeFactor
+    int state
+    int terminalTime
+    int touchCount
+    bool wasIntersecting
+    float fillPercent
+    int score
+    int categoryCount
+    bool candidateCounted
+    string scoreBreakdown
+    string rejectionReason
+    int structuralLegId
+    box zoneBox
+    label zoneLabel
+
+type PivotMark
+    float price
+    int side
+    int originBar
+    int originTime
+
+type LiquidityPool
+    string id
+    int side
+    float price
+    int touches
+    int firstBar
+    int lastTouchBar
+    int firstTime
+    int lastTouchTime
+    int qualifiedTime
+    bool active
+    int terminalTime
+    line poolLine
+    label poolLabel
+
+type Trade
+    string id
+    string zoneId
+    string zoneType
+    string sourceTf
+    int direction
+    int state
+    int score
+    int categoryCount
+    string evidence
+    int entryTime
+    int entryBar
+    int plannedEndTime
+    int terminalTime
+    float entryPrice
+    float stopPrice
+    float target1
+    float target15
+    float target2
+    bool target1Hit
+    bool target15Hit
+    box setupBox
+    box riskBox
+    box reward1Box
+    box reward15Box
+    box reward2Box
+    line stopLine
+    line target1Line
+    line target15Line
+    line target2Line
+    label signalLabel
+    label stopLabel
+    label target1Label
+    label target15Label
+    label target2Label
+    label outcomeLabel
+
+var Zone[] zones = array.new<Zone>()
+var PivotMark[] pivotMarks = array.new<PivotMark>()
+var Trade[] trades = array.new<Trade>()
+var LiquidityPool[] liquidityPools = array.new<LiquidityPool>()
+var label[] researchCandidateLabels = array.new_label()
+var int[] researchBucketSignals = array.new_int(5, 0)
+var int[] researchBucketWins = array.new_int(5, 0)
+var int[] researchBucketStops = array.new_int(5, 0)
+
+const string G_GENERAL = "01 — Quick Start"
+const string G_TIMEFRAMES = "02 — Zone Timeframes + Lifetimes"
+const string G_CONCEPTS = "03 — Zone Concepts + Size Filters"
+const string G_STRUCTURE = "04 — Structure + Liquidity"
+const string G_CONTEXT = "05 — Market Context"
+const string G_SCORING = "06 — Signal Qualification"
+const string G_EXECUTION = "07 — Trade Execution + Risk"
+const string G_VISUAL = "08 — Chart + Regime Table"
+const string G_RESEARCH = "09 — Research Diagnostics"
+const string G_ALERTS = "10 — Alerts"
+
+bool indicatorEnabled = input.bool(true, "Enable indicator", group = G_GENERAL)
+bool allowUnsupportedSymbols = input.bool(false, "Allow symbols other than NQ/ES", group = G_GENERAL)
+bool allowNonOneMinuteCharts = input.bool(false, "Allow chart timeframes above 1 minute", tooltip = "The execution engine is optimized for the 1-minute chart. Higher chart timeframes are diagnostic only unless this option is enabled.", group = G_GENERAL)
+string sessionTimezone = input.string("America/New_York", "Session timezone", group = G_GENERAL)
+string futuresSession = input.session("1800-1700:1234567", "Futures session", group = G_GENERAL)
+string overnightSession = input.session("1800-0930:1234567", "Overnight session", group = G_GENERAL)
+string rthSession = input.session("0930-1600:23456", "Regular trading hours", group = G_GENERAL)
+string signalSession = input.session("0800-1600:23456", "Signal window", tooltip = "Default covers the primary New York intraday window. Expand it when you intentionally want overnight or evening signals.", group = G_GENERAL)
+int maximumActiveTrades = input.int(3, "Maximum active trades", minval = 1, maxval = 3, group = G_GENERAL)
+bool showPastTrades = input.bool(false, "Show past trades", group = G_GENERAL)
+int pastTradeRetentionHours = input.int(22, "Past-trade retention hours", minval = 1, maxval = 72, group = G_GENERAL, active = showPastTrades)
+int completedRetentionMinutes = input.int(5, "Default completed-trade retention", minval = 0, maxval = 120, group = G_GENERAL, active = not showPastTrades)
+
+bool useChartZones = input.bool(true, "Chart-timeframe zones", group = G_TIMEFRAMES)
+bool use5m = input.bool(true, "5-minute", inline = "tf1", group = G_TIMEFRAMES)
+bool use15m = input.bool(true, "15-minute", inline = "tf1", group = G_TIMEFRAMES)
+bool use30m = input.bool(true, "30-minute", inline = "tf1", group = G_TIMEFRAMES)
+bool use1h = input.bool(true, "1-hour", inline = "tf2", group = G_TIMEFRAMES)
+bool use4h = input.bool(true, "4-hour", inline = "tf2", group = G_TIMEFRAMES)
+int chartZoneLifeMinutes = input.int(10, "1m/chart zone maximum life", minval = 2, maxval = 60, group = G_TIMEFRAMES)
+int zoneLife5m = input.int(30, "5m zone maximum life", minval = 5, maxval = 240, group = G_TIMEFRAMES)
+int zoneLife15m = input.int(60, "15m zone maximum life", minval = 15, maxval = 720, group = G_TIMEFRAMES)
+int zoneLife30m = input.int(90, "30m zone maximum life", minval = 30, maxval = 1440, group = G_TIMEFRAMES)
+int zoneLife1h = input.int(120, "1H zone maximum life", minval = 60, maxval = 2880, group = G_TIMEFRAMES)
+bool fourHourZonesUntilSessionEnd = input.bool(true, "4H zones last until futures-session close", group = G_TIMEFRAMES)
+int zoneLife4h = input.int(1380, "4H fallback maximum life", minval = 120, maxval = 2880, group = G_TIMEFRAMES, active = not fourHourZonesUntilSessionEnd)
+string zoneLifetimeMode = input.string("Fixed by timeframe", "Zone lifetime mode", options = ["Fixed by timeframe", "Shorten weaker zones"], tooltip = "Fixed mode uses the complete timeframe-specific lifetime. Score-adjusted mode shortens moderate and weak zones but never extends them beyond the configured maximum.", group = G_TIMEFRAMES)
+int transformedZoneLifetimePercent = input.int(50, "IFVG / BB lifetime (% of source zone)", minval = 10, maxval = 100, tooltip = "When an FVG flips into an IFVG, or an Order Block flips into a Breaker Block, the transformed zone receives a new timer from the transformation candle. The default is 50% of the normal lifetime for that source timeframe.", group = G_TIMEFRAMES)
+int strongZoneScore = input.int(80, "Full-life score", minval = 50, maxval = 100, group = G_TIMEFRAMES)
+int moderateZoneScore = input.int(65, "Three-quarter-life score", minval = 30, maxval = 95, group = G_TIMEFRAMES)
+
+bool enableFvg = input.bool(true, "Fair Value Gaps", group = G_CONCEPTS)
+bool enableIfvg = input.bool(true, "Inversion FVGs", group = G_CONCEPTS)
+bool enableOb = input.bool(true, "Order Blocks", group = G_CONCEPTS)
+bool enableBb = input.bool(true, "Breaker Blocks", group = G_CONCEPTS)
+int minimumZoneTicks = input.int(5, "Minimum zone width (ticks)", minval = 1, maxval = 100, tooltip = "A zone must be at least this many minimum price ticks wide. The default of 5 ticks is intended for NQ/MNQ one-minute execution and also filters very small higher-timeframe zones.", group = G_CONCEPTS)
+float minimumZoneAtr = input.float(0.03, "Minimum zone size / source ATR", minval = 0.0, maxval = 2.0, step = 0.01, group = G_CONCEPTS)
+float maximumZoneAtr = input.float(1.50, "Maximum zone size / source ATR", minval = 0.10, maxval = 10.0, step = 0.05, group = G_CONCEPTS)
+float htfDisplacementAtr = input.float(0.75, "HTF displacement body / ATR", minval = 0.20, maxval = 3.0, step = 0.05, group = G_CONCEPTS)
+float htfDisplacementBodyFraction = input.float(0.55, "HTF displacement body fraction", minval = 0.20, maxval = 1.0, step = 0.05, group = G_CONCEPTS)
+int htfBosLookback = input.int(5, "HTF structure lookback", minval = 2, maxval = 20, group = G_CONCEPTS)
+
+int pivotLeft = input.int(2, "Pivot left", minval = 1, maxval = 10, inline = "pivot", group = G_STRUCTURE)
+int pivotRight = input.int(2, "Pivot right", minval = 1, maxval = 10, inline = "pivot", group = G_STRUCTURE)
+int structureValidityBars = input.int(5, "Immediate structure-event bars", minval = 1, maxval = 20, group = G_STRUCTURE)
+int structureValidityMinutes = input.int(30, "Same-leg structure validity minutes", minval = 5, maxval = 180, group = G_STRUCTURE)
+int displacementValidityMinutes = input.int(20, "Displacement validity minutes", minval = 3, maxval = 120, group = G_STRUCTURE)
+float executionDisplacementAtr = input.float(0.65, "Execution displacement body / ATR", minval = 0.10, maxval = 3.0, step = 0.05, group = G_STRUCTURE)
+float executionBodyFraction = input.float(0.52, "Execution body fraction", minval = 0.10, maxval = 1.0, step = 0.05, group = G_STRUCTURE)
+bool useLiquidityPools = input.bool(true, "Repeated-wick liquidity pools", group = G_STRUCTURE)
+int liquidityPoolToleranceTicks = input.int(10, "Pool tolerance in ticks", minval = 2, maxval = 100, group = G_STRUCTURE)
+int liquidityPoolMinimumTouches = input.int(3, "Minimum pool touches", minval = 2, maxval = 8, group = G_STRUCTURE)
+int liquidityPoolLookbackBars = input.int(360, "Pool lookback bars", minval = 30, maxval = 2000, group = G_STRUCTURE)
+int liquidityPoolBreakTicks = input.int(3, "Pool break confirmation ticks", minval = 1, maxval = 50, group = G_STRUCTURE)
+bool usePoolsAsObjectives = input.bool(true, "Use liquidity pools as trade objectives", group = G_STRUCTURE)
+int liquiditySweepValidityBars = input.int(12, "Liquidity-event validity bars", minval = 1, maxval = 60, group = G_STRUCTURE)
+int openingRangeMinutes = input.int(15, "Opening Range minutes", options = [5, 15, 30], group = G_STRUCTURE)
+
+bool useVwap = input.bool(true, "Session and RTH VWAP", group = G_CONTEXT)
+bool useRsi = input.bool(true, "RSI", group = G_CONTEXT)
+int rsiLength = input.int(14, "RSI length", minval = 2, maxval = 50, group = G_CONTEXT)
+bool useZScore = input.bool(true, "Rolling z-score", group = G_CONTEXT)
+int zScoreLength = input.int(50, "Z-score length", minval = 10, maxval = 300, group = G_CONTEXT)
+float zScoreExtreme = input.float(1.50, "Z-score extreme", minval = 0.50, maxval = 4.0, step = 0.10, group = G_CONTEXT)
+bool useSmt = input.bool(true, "NQ/ES SMT divergence", group = G_CONTEXT)
+string manualSmtSymbol = input.symbol("CME_MINI:ES1!", "Manual SMT symbol", group = G_CONTEXT)
+bool automaticSmtPair = input.bool(true, "Automatic NQ ↔ ES pairing", group = G_CONTEXT)
+int smtPivotLength = input.int(3, "SMT pivot length", minval = 1, maxval = 10, group = G_CONTEXT)
+int smtMaximumSeparationBars = input.int(3, "SMT maximum pivot separation", minval = 0, maxval = 20, group = G_CONTEXT)
+int smtValidityBars = input.int(20, "SMT validity bars", minval = 1, maxval = 100, group = G_CONTEXT)
+bool usePowerOfThree = input.bool(true, "Power-of-three session proxy", group = G_CONTEXT)
+bool useOpeningRange = input.bool(true, "Opening Range breakout/retest", group = G_CONTEXT)
+bool useRvol = input.bool(true, "Same-time relative volume", group = G_CONTEXT)
+int rvolBaselineSessions = input.int(30, "RVOL baseline sessions", minval = 5, maxval = MAX_RVOL_SESSIONS, group = G_CONTEXT)
+int rvolMinimumSamples = input.int(5, "RVOL minimum samples", minval = 2, maxval = 30, group = G_CONTEXT)
+float elevatedRvol = input.float(1.25, "Elevated RVOL", minval = 0.50, maxval = 5.0, step = 0.05, group = G_CONTEXT)
+
+int minimumScore = input.int(80, "Live signal minimum score", minval = 50, maxval = 100, group = G_SCORING)
+int minimumCategories = input.int(4, "Minimum independent categories", minval = 2, maxval = 6, group = G_SCORING)
+bool requireStructure = input.bool(true, "Require recent BOS/MSS", group = G_SCORING)
+bool requireDisplacement = input.bool(true, "Require recent displacement", group = G_SCORING)
+int maximumEntryTouches = input.int(2, "Maximum zone touches before entry", minval = 1, maxval = 6, group = G_SCORING)
+bool oneTradePerStructuralLeg = input.bool(true, "One trade per structural leg", group = G_SCORING)
+int sameDirectionCooldownBars = input.int(5, "Same-direction cooldown bars", minval = 0, maxval = 60, group = G_SCORING)
+float minimumObjectiveR = input.float(0.80, "Minimum space to objective in R", minval = 0.0, maxval = 3.0, step = 0.10, group = G_SCORING)
+
+string entryMode = input.string("Rejection close", "Entry mode", options = ["First touch", "Midpoint reclaim", "Rejection close"], group = G_EXECUTION)
+int atrLength = input.int(14, "ATR length", minval = 5, maxval = 100, group = G_EXECUTION)
+int stopBufferTicks = input.int(2, "Invalidation buffer ticks", minval = 0, maxval = 100, group = G_EXECUTION)
+string stopLimitMode = input.string("Automatic", "Stop-size limits", options = ["Automatic", "Custom", "Off"], group = G_EXECUTION)
+int customMaxStopTicks = input.int(40, "Custom maximum stop ticks", minval = 2, maxval = 400, group = G_EXECUTION, active = stopLimitMode == "Custom")
+float maximumStopAtr = input.float(0.80, "Maximum stop / ATR", minval = 0.10, maxval = 5.0, step = 0.05, group = G_EXECUTION, active = stopLimitMode != "Off")
+int tradeDurationMinutes = input.int(30, "Trade drawing duration", minval = 5, maxval = 240, group = G_EXECUTION)
+int maximumRetainedTrades = input.int(20, "Maximum retained trades", minval = 3, maxval = MAX_TRADES, group = G_EXECUTION)
+
+color bullishSignalColor = input.color(color.rgb(33, 255, 153), "BUY signal", group = G_VISUAL)
+color bearishSignalColor = input.color(color.rgb(255, 58, 99), "SELL signal", group = G_VISUAL)
+color bullishZoneColor = input.color(color.rgb(85, 205, 176), "Bullish setup zone", group = G_VISUAL)
+color bearishZoneColor = input.color(color.rgb(224, 103, 130), "Bearish setup zone", group = G_VISUAL)
+color riskColor = input.color(color.rgb(255, 56, 91), "Risk tint", group = G_VISUAL)
+color rewardColor = input.color(color.rgb(45, 239, 143), "Reward tint", group = G_VISUAL)
+color stopColor = input.color(color.rgb(255, 55, 96), "Neon stop", group = G_VISUAL)
+color targetColor = input.color(color.rgb(64, 255, 155), "Neon targets", group = G_VISUAL)
+color accentColor = input.color(color.rgb(155, 93, 229), "Meridian accent", group = G_VISUAL)
+color neutralColor = input.color(color.rgb(135, 139, 151), "Neutral", group = G_VISUAL)
+int setupZoneTransparency = input.int(90, "Setup-zone transparency", minval = 70, maxval = 98, group = G_VISUAL)
+int riskTransparency = input.int(90, "Risk transparency", minval = 70, maxval = 98, group = G_VISUAL)
+int reward1Transparency = input.int(87, "Entry-to-1R transparency", minval = 70, maxval = 98, group = G_VISUAL)
+int reward15Transparency = input.int(92, "1R-to-1.5R transparency", minval = 70, maxval = 99, group = G_VISUAL)
+int reward2Transparency = input.int(95, "1.5R-to-2R transparency", minval = 70, maxval = 99, group = G_VISUAL)
+int historicalTransparency = input.int(96, "Historical-trade transparency", minval = 85, maxval = 99, group = G_VISUAL)
+int lineWidth = input.int(2, "Stop/target line width", minval = 1, maxval = 4, group = G_VISUAL)
+string labelSizeInput = input.string("Normal", "Trade label size", options = ["Tiny", "Small", "Normal", "Large"], group = G_VISUAL)
+string researchLabelSizeInput = input.string("Normal", "Zone label size", options = ["Tiny", "Small", "Normal", "Large"], group = G_VISUAL)
+bool showRegimePanel = input.bool(true, "Show multi-timeframe regime panel", group = G_VISUAL)
+string panelPosition = input.string("Bottom Right", "Regime table position", options = ["Top Left", "Top Center", "Top Right", "Middle Left", "Middle Center", "Middle Right", "Bottom Left", "Bottom Center", "Bottom Right"], group = G_VISUAL)
+string panelTextSizeInput = input.string("Tiny", "Regime table text size", options = ["Tiny", "Small", "Normal", "Large"], group = G_VISUAL)
+bool showZoneScores = input.bool(false, "Show scores in zone labels", tooltip = "When disabled, zone labels use only the timeframe and concept name. Score details remain available in tooltips and the research table.", group = G_VISUAL)
+string zoneLabelPlacement = input.string("Inside right", "Zone label placement", options = ["Inside right", "Above right"], tooltip = "Inside right places the label at the zone midpoint near its right edge. Above right preserves the earlier label position.", group = G_VISUAL)
+int liquidityLabelOffsetTicks = input.int(2, "Liquidity label offset (ticks)", minval = 0, maxval = 20, tooltip = "Support labels are placed below the pool line. Resistance labels are placed above it.", group = G_VISUAL)
+
+bool showAllResearchZones = input.bool(false, "Show active research zones", group = G_RESEARCH)
+string researchZoneFilter = input.string("Relevant only", "Research zone filter", options = ["Relevant only", "All active"], group = G_RESEARCH, active = RESEARCH_BUILD)
+bool showLiquidityPoolLines = input.bool(RESEARCH_BUILD, "Show active liquidity-pool lines", group = G_RESEARCH, active = RESEARCH_BUILD)
+int liquidityPoolForwardMinutes = input.int(10, "Liquidity-line forward projection", minval = 1, maxval = 120, group = G_RESEARCH, active = RESEARCH_BUILD and showLiquidityPoolLines)
+bool showInvalidatedZoneHistory = input.bool(true, "Show recently invalidated zones", tooltip = "Keeps the original FVG or Order Block visible up to its invalidation candle. This makes FVG-to-IFVG and OB-to-BB transitions auditable without extending the old zone beyond invalidation.", group = G_RESEARCH, active = RESEARCH_BUILD)
+int invalidatedZoneRetentionMinutes = input.int(120, "Invalidated-zone history retention", minval = 5, maxval = 1440, group = G_RESEARCH, active = RESEARCH_BUILD and showInvalidatedZoneHistory)
+int maximumResearchZones = input.int(20, "Maximum visible research zones", minval = 5, maxval = 60, group = G_RESEARCH, active = RESEARCH_BUILD)
+int researchCandidateMinimum = input.int(35, "Research candidate minimum", minval = 0, maxval = 100, group = G_RESEARCH, active = RESEARCH_BUILD)
+bool showRejectedCandidates = input.bool(false, "Show rejected touched candidates", group = G_RESEARCH, active = RESEARCH_BUILD)
+bool showDetailedZoneTooltips = input.bool(true, "Detailed zone tooltips", tooltip = "Hover a zone label to inspect its score, category count, and score breakdown without adding text to the chart.", group = G_RESEARCH, active = RESEARCH_BUILD)
+
+bool enableAlerts = input.bool(true, "Enable alerts", group = G_ALERTS)
+bool enableJsonAlerts = input.bool(false, "Dynamic JSON alert() messages", group = G_ALERTS)
+bool alertSignals = input.bool(true, "BUY / SELL signal", group = G_ALERTS)
+bool alertTargets = input.bool(true, "Target reached", group = G_ALERTS)
+bool alertStops = input.bool(true, "Stop reached", group = G_ALERTS)
+
+f_clamp(float value, float lowValue, float highValue) =>
+    math.max(lowValue, math.min(highValue, value))
+
+f_in_session(string sessionValue) =>
+    not na(time(timeframe.period, sessionValue, sessionTimezone))
+
+f_date_key() =>
+    year(time, sessionTimezone) * 10000 + month(time, sessionTimezone) * 100 + dayofmonth(time, sessionTimezone)
+
+f_window_active(int startHour, int startMinute, int durationMinutes) =>
+    int startTime = timestamp(sessionTimezone, year(time, sessionTimezone), month(time, sessionTimezone), dayofmonth(time, sessionTimezone), startHour, startMinute)
+    int endTime = startTime + durationMinutes * 60 * 1000
+    timeframe.isintraday and time < endTime and time_close > startTime
+
+f_label_size(string value) =>
+    switch value
+        "Tiny" => size.tiny
+        "Normal" => size.normal
+        "Large" => size.large
+        => size.small
+
+f_panel_position(string value) =>
+    switch value
+        "Top Left" => position.top_left
+        "Top Center" => position.top_center
+        "Top Right" => position.top_right
+        "Middle Left" => position.middle_left
+        "Middle Center" => position.middle_center
+        "Middle Right" => position.middle_right
+        "Bottom Left" => position.bottom_left
+        "Bottom Center" => position.bottom_center
+        => position.bottom_right
+
+f_direction_text(int directionValue) =>
+    directionValue == DIR_BULL ? "BULL" : directionValue == DIR_BEAR ? "BEAR" : "NONE"
+
+f_score_bucket(int scoreValue) =>
+    scoreValue >= 90 ? 4 : scoreValue >= 80 ? 3 : scoreValue >= 70 ? 2 : scoreValue >= 60 ? 1 : 0
+
+f_timeframe_rank(string sourceTf) =>
+    sourceTf == "240" ? 6 : sourceTf == "60" ? 5 : sourceTf == "30" ? 4 : sourceTf == "15" ? 3 : sourceTf == "5" ? 2 : 1
+
+f_timeframe_label(string sourceTf) =>
+    sourceTf == "240" ? "4H" : sourceTf == "60" ? "1H" : sourceTf == "30" ? "30M" : sourceTf == "15" ? "15M" : sourceTf == "5" ? "5M" : sourceTf == "1" or timeframe.period == "1" ? "1M" : sourceTf
+
+f_zone_max_life_minutes(string sourceTf) =>
+    sourceTf == "240" ? zoneLife4h : sourceTf == "60" ? zoneLife1h : sourceTf == "30" ? zoneLife30m : sourceTf == "15" ? zoneLife15m : sourceTf == "5" ? zoneLife5m : chartZoneLifeMinutes
+
+f_zone_life_minutes(string sourceTf, int scoreValue) =>
+    int maximumLife = f_zone_max_life_minutes(sourceTf)
+    float multiplier = zoneLifetimeMode == "Fixed by timeframe" ? 1.0 : scoreValue >= strongZoneScore ? 1.0 : scoreValue >= moderateZoneScore ? 0.75 : 0.50
+    math.max(2, int(math.round(maximumLife * multiplier)))
+
+f_futures_session_close_after(int timestampValue) =>
+    int y = year(timestampValue, sessionTimezone)
+    int m = month(timestampValue, sessionTimezone)
+    int d = dayofmonth(timestampValue, sessionTimezone)
+    int closeToday = timestamp(sessionTimezone, y, m, d, 17, 0)
+    timestampValue < closeToday ? closeToday : timestamp(sessionTimezone, y, m, d + 1, 17, 0)
+
+f_zone_expiry_time(int detectedTimeValue, string sourceTf, int scoreValue, float lifetimeFactorValue) =>
+    float safeFactor = f_clamp(lifetimeFactorValue, 0.10, 1.0)
+    if sourceTf == "240" and fourHourZonesUntilSessionEnd
+        int sessionClose = f_futures_session_close_after(detectedTimeValue)
+        int remainingMs = math.max(2 * 60 * 1000, sessionClose - detectedTimeValue)
+        detectedTimeValue + int(math.round(remainingMs * safeFactor))
+    else
+        int baseMinutes = f_zone_life_minutes(sourceTf, scoreValue)
+        detectedTimeValue + math.max(2, int(math.round(baseMinutes * safeFactor))) * 60 * 1000
+
+f_zone_authority_raw(string sourceTf, string zoneTypeValue, float topValue, float bottomValue, float sourceAtrValue) =>
+    int tfPoints = sourceTf == "240" ? 22 : sourceTf == "60" ? 18 : sourceTf == "30" ? 15 : sourceTf == "15" ? 12 : sourceTf == "5" ? 8 : 5
+    int typePoints = zoneTypeValue == "BB" ? 4 : zoneTypeValue == "IFVG" ? 3 : zoneTypeValue == "OB" ? 2 : 0
+    float sizeAtr = sourceAtrValue > 0 ? math.abs(topValue - bottomValue) / sourceAtrValue : 0.0
+    int widthPoints = int(math.round(f_clamp(sizeAtr / 0.60, 0.0, 1.0) * 4.0))
+    math.min(tfPoints + typePoints + widthPoints, 30)
+
+f_regime_text(int scoreValue) =>
+    na(scoreValue) ? "WAITING" : scoreValue >= 60 ? "STRONG BULL" : scoreValue >= 25 ? "BULLISH" : scoreValue <= -60 ? "STRONG BEAR" : scoreValue <= -25 ? "BEARISH" : "BALANCED"
+
+f_regime_color(int scoreValue) =>
+    na(scoreValue) ? neutralColor : scoreValue >= 25 ? bullishSignalColor : scoreValue <= -25 ? bearishSignalColor : neutralColor
+
+f_regime_score_text(int scoreValue) =>
+    na(scoreValue) ? "—" : str.tostring(math.abs(scoreValue))
+
+f_trade_terminal(int stateValue) =>
+    stateValue == T_COMPLETED or stateValue == T_STOPPED or stateValue == T_EXPIRED
+
+f_zone_id(string zoneTypeValue, int directionValue, string sourceTf, int detectedTimeValue) =>
+    zoneTypeValue + "|" + str.tostring(directionValue) + "|" + sourceTf + "|" + str.tostring(detectedTimeValue)
+
+f_json_safe(string value) =>
+    str.replace_all(str.replace_all(value, "\\", ""), "\"", "'")
+
+f_delete_zone_drawings(Zone zoneValue) =>
+    if not na(zoneValue.zoneBox)
+        box.delete(zoneValue.zoneBox)
+        zoneValue.zoneBox := na
+    if not na(zoneValue.zoneLabel)
+        label.delete(zoneValue.zoneLabel)
+        zoneValue.zoneLabel := na
+
+f_delete_trade_drawings(Trade tradeValue) =>
+    if not na(tradeValue.setupBox)
+        box.delete(tradeValue.setupBox)
+    if not na(tradeValue.riskBox)
+        box.delete(tradeValue.riskBox)
+    if not na(tradeValue.reward1Box)
+        box.delete(tradeValue.reward1Box)
+    if not na(tradeValue.reward15Box)
+        box.delete(tradeValue.reward15Box)
+    if not na(tradeValue.reward2Box)
+        box.delete(tradeValue.reward2Box)
+    if not na(tradeValue.stopLine)
+        line.delete(tradeValue.stopLine)
+    if not na(tradeValue.target1Line)
+        line.delete(tradeValue.target1Line)
+    if not na(tradeValue.target15Line)
+        line.delete(tradeValue.target15Line)
+    if not na(tradeValue.target2Line)
+        line.delete(tradeValue.target2Line)
+    if not na(tradeValue.signalLabel)
+        label.delete(tradeValue.signalLabel)
+    if not na(tradeValue.stopLabel)
+        label.delete(tradeValue.stopLabel)
+    if not na(tradeValue.target1Label)
+        label.delete(tradeValue.target1Label)
+    if not na(tradeValue.target15Label)
+        label.delete(tradeValue.target15Label)
+    if not na(tradeValue.target2Label)
+        label.delete(tradeValue.target2Label)
+    if not na(tradeValue.outcomeLabel)
+        label.delete(tradeValue.outcomeLabel)
+
+f_active_trade_count() =>
+    int result = 0
+    if array.size(trades) > 0
+        for i = 0 to array.size(trades) - 1
+            Trade value = array.get(trades, i)
+            if not f_trade_terminal(value.state)
+                result += 1
+    result
+
+f_zone_exists(string idValue) =>
+    bool exists = false
+    if array.size(zones) > 0
+        for i = 0 to array.size(zones) - 1
+            if array.get(zones, i).id == idValue
+                exists := true
+                break
+    exists
+
+f_register_zone(string zoneTypeValue, int directionValue, string sourceTf, float topValue, float bottomValue, int sourceTime, float sourceAtrValue, float lifetimeFactorValue) =>
+    float normalizedTop = math.max(topValue, bottomValue)
+    float normalizedBottom = math.min(topValue, bottomValue)
+    float sourceAtrSafe = na(sourceAtrValue) or sourceAtrValue <= 0 ? ta.atr(atrLength) : sourceAtrValue
+    float zoneWidth = normalizedTop - normalizedBottom
+    float sizeAtr = sourceAtrSafe > 0 ? zoneWidth / sourceAtrSafe : na
+    float sizeTicks = zoneWidth / syminfo.mintick
+    string idValue = f_zone_id(zoneTypeValue, directionValue, sourceTf, sourceTime)
+    bool typeEnabled = zoneTypeValue == "FVG" ? enableFvg : zoneTypeValue == "IFVG" ? enableIfvg : zoneTypeValue == "OB" ? enableOb : enableBb
+    if indicatorEnabled and typeEnabled and not f_zone_exists(idValue) and not na(sizeAtr) and sizeTicks >= minimumZoneTicks and sizeAtr >= minimumZoneAtr and sizeAtr <= maximumZoneAtr
+        int initialAuthority = f_zone_authority_raw(sourceTf, zoneTypeValue, normalizedTop, normalizedBottom, sourceAtrSafe)
+        Zone zoneValue = Zone.new(
+             id = idValue,
+             zoneType = zoneTypeValue,
+             sourceTf = sourceTf,
+             sourceRank = f_timeframe_rank(sourceTf),
+             direction = directionValue,
+             top = normalizedTop,
+             bottom = normalizedBottom,
+             midpoint = (normalizedTop + normalizedBottom) * 0.5,
+             sourceAtr = sourceAtrSafe,
+             originTime = sourceTime,
+             detectedTime = time_close,
+             detectedBar = bar_index,
+             expiryTime = f_zone_expiry_time(time_close, sourceTf, math.max(initialAuthority, moderateZoneScore), lifetimeFactorValue),
+             lifetimeFactor = lifetimeFactorValue,
+             state = Z_ACTIVE,
+             terminalTime = na,
+             touchCount = 0,
+             wasIntersecting = false,
+             fillPercent = 0.0,
+             score = 0,
+             categoryCount = 0,
+             candidateCounted = false,
+             scoreBreakdown = "",
+             rejectionReason = "",
+             structuralLegId = 0,
+             zoneBox = na,
+             zoneLabel = na)
+        array.push(zones, zoneValue)
+
+    while array.size(zones) > MAX_ZONES
+        Zone oldZone = array.shift(zones)
+        f_delete_zone_drawings(oldZone)
+
+f_htf_payload() =>
+    float sourceAtr = ta.atr(atrLength)
+    float sourceEma20 = ta.ema(close, 20)
+    float sourceEma50 = ta.ema(close, 50)
+    float sourceRsi = ta.rsi(close, rsiLength)
+    float sourceVwap = ta.vwap(hlc3)
+    float sourceVolAverage = ta.sma(volume, 20)
+    float candleRange = high[1] - low[1]
+    float candleBody = math.abs(close[1] - open[1])
+    float bodyFraction = candleRange > 0 ? candleBody / candleRange : 0.0
+    bool bullDisplacement = close[1] > open[1] and candleBody >= sourceAtr[1] * htfDisplacementAtr and bodyFraction >= htfDisplacementBodyFraction
+    bool bearDisplacement = close[1] < open[1] and candleBody >= sourceAtr[1] * htfDisplacementAtr and bodyFraction >= htfDisplacementBodyFraction
+    float priorHigh = ta.highest(high[2], htfBosLookback)
+    float priorLow = ta.lowest(low[2], htfBosLookback)
+    bool bullFvgEvent = low[1] > high[3]
+    bool bearFvgEvent = high[1] < low[3]
+    bool bullObEvent = bullDisplacement and close[1] > priorHigh and close[2] < open[2]
+    bool bearObEvent = bearDisplacement and close[1] < priorLow and close[2] > open[2]
+
+    int regimeScore = 0
+    regimeScore += close[1] > sourceEma20[1] and sourceEma20[1] > sourceEma50[1] ? 28 : close[1] < sourceEma20[1] and sourceEma20[1] < sourceEma50[1] ? -28 : 0
+    regimeScore += sourceEma20[1] > sourceEma20[4] ? 14 : sourceEma20[1] < sourceEma20[4] ? -14 : 0
+    regimeScore += close[1] > sourceVwap[1] ? 16 : close[1] < sourceVwap[1] ? -16 : 0
+    regimeScore += sourceRsi[1] >= 60 ? 16 : sourceRsi[1] >= 53 ? 8 : sourceRsi[1] <= 40 ? -16 : sourceRsi[1] <= 47 ? -8 : 0
+    float sourceMomentum = sourceAtr[1] > 0 ? (close[1] - close[4]) / sourceAtr[1] : 0.0
+    regimeScore += sourceMomentum >= 1.0 ? 16 : sourceMomentum >= 0.35 ? 8 : sourceMomentum <= -1.0 ? -16 : sourceMomentum <= -0.35 ? -8 : 0
+    float sourceVolRatio = sourceVolAverage[1] > 0 ? volume[1] / sourceVolAverage[1] : 1.0
+    if sourceVolRatio >= 1.20
+        regimeScore += regimeScore > 0 ? 10 : regimeScore < 0 ? -10 : 0
+    regimeScore := int(math.round(f_clamp(regimeScore, -100.0, 100.0)))
+
+    [bullFvgEvent, low[1], high[3], time[3], bearFvgEvent, low[3], high[1], time[3], bullObEvent, high[2], low[2], time[2], bearObEvent, high[2], low[2], time[2], sourceAtr[1], close[1], sourceEma20[1], sourceEma50[1], regimeScore]
+
+f_register_payload(bool enabledTf, string sourceTf, bool bullFvgEvent, float bullFvgTop, float bullFvgBottom, int bullFvgTime, bool bearFvgEvent, float bearFvgTop, float bearFvgBottom, int bearFvgTime, bool bullObEvent, float bullObTop, float bullObBottom, int bullObTime, bool bearObEvent, float bearObTop, float bearObBottom, int bearObTime, float sourceAtrValue) =>
+    if enabledTf and barstate.isconfirmed
+        if bullFvgEvent
+            f_register_zone("FVG", DIR_BULL, sourceTf, bullFvgTop, bullFvgBottom, bullFvgTime, sourceAtrValue, 1.0)
+        if bearFvgEvent
+            f_register_zone("FVG", DIR_BEAR, sourceTf, bearFvgTop, bearFvgBottom, bearFvgTime, sourceAtrValue, 1.0)
+        if bullObEvent
+            f_register_zone("OB", DIR_BULL, sourceTf, bullObTop, bullObBottom, bullObTime, sourceAtrValue, 1.0)
+        if bearObEvent
+            f_register_zone("OB", DIR_BEAR, sourceTf, bearObTop, bearObBottom, bearObTime, sourceAtrValue, 1.0)
+
+f_zone_base_points(Zone zoneValue) =>
+    f_zone_authority_raw(zoneValue.sourceTf, zoneValue.zoneType, zoneValue.top, zoneValue.bottom, zoneValue.sourceAtr)
+
+f_overlap_points(Zone targetZone) =>
+    int points = 0
+    if array.size(zones) > 0
+        for i = 0 to array.size(zones) - 1
+            Zone other = array.get(zones, i)
+            bool activeOther = other.id != targetZone.id and other.direction == targetZone.direction and other.state == Z_ACTIVE
+            bool overlap = math.max(targetZone.bottom, other.bottom) < math.min(targetZone.top, other.top)
+            if activeOther and overlap
+                int rankPoints = other.sourceTf == "240" ? 15 : other.sourceTf == "60" ? 12 : other.sourceTf == "30" ? 9 : other.sourceTf == "15" ? 7 : other.sourceTf == "5" ? 4 : 2
+                bool nested = targetZone.bottom >= other.bottom and targetZone.top <= other.top
+                points += rankPoints + (nested ? 3 : 0)
+    math.min(points, 25)
+
+f_near_price(float valueA, float valueB, float tolerance) =>
+    not na(valueA) and not na(valueB) and math.abs(valueA - valueB) <= tolerance
+
+f_delete_pool_drawings(LiquidityPool poolValue) =>
+    if not na(poolValue.poolLine)
+        line.delete(poolValue.poolLine)
+        poolValue.poolLine := na
+    if not na(poolValue.poolLabel)
+        label.delete(poolValue.poolLabel)
+        poolValue.poolLabel := na
+
+f_register_liquidity_pool(int sideValue, float pivotPrice, int originBarValue, int originTimeValue) =>
+    float tolerance = liquidityPoolToleranceTicks * syminfo.mintick
+    int matchedIndex = na
+    float nearestDistance = 1e20
+    if array.size(liquidityPools) > 0
+        for i = 0 to array.size(liquidityPools) - 1
+            LiquidityPool poolValue = array.get(liquidityPools, i)
+            float distance = math.abs(poolValue.price - pivotPrice)
+            bool eligible = poolValue.active and poolValue.side == sideValue and originBarValue - poolValue.lastTouchBar <= liquidityPoolLookbackBars and distance <= tolerance
+            if eligible and distance < nearestDistance
+                matchedIndex := i
+                nearestDistance := distance
+    if na(matchedIndex)
+        string idValue = "LP|" + str.tostring(sideValue) + "|" + str.tostring(originTimeValue)
+        LiquidityPool newPool = LiquidityPool.new(
+             id = idValue,
+             side = sideValue,
+             price = pivotPrice,
+             touches = 1,
+             firstBar = originBarValue,
+             lastTouchBar = originBarValue,
+             firstTime = originTimeValue,
+             lastTouchTime = originTimeValue,
+             qualifiedTime = na,
+             active = true,
+             terminalTime = na,
+             poolLine = na,
+             poolLabel = na)
+        array.push(liquidityPools, newPool)
+    else
+        LiquidityPool poolValue = array.get(liquidityPools, matchedIndex)
+        bool newBoundaryExtreme = sideValue == POOL_SUPPORT ? pivotPrice < poolValue.price : pivotPrice > poolValue.price
+        if newBoundaryExtreme
+            poolValue.price := pivotPrice
+            poolValue.firstBar := originBarValue
+            poolValue.firstTime := originTimeValue
+        poolValue.touches += 1
+        poolValue.lastTouchBar := originBarValue
+        poolValue.lastTouchTime := originTimeValue
+        if na(poolValue.qualifiedTime) and poolValue.touches >= liquidityPoolMinimumTouches
+            poolValue.qualifiedTime := time_close
+
+    while array.size(liquidityPools) > MAX_LIQUIDITY_POOLS
+        LiquidityPool oldPool = array.shift(liquidityPools)
+        f_delete_pool_drawings(oldPool)
+
+f_best_active_pool(int sideValue, float referencePrice) =>
+    float bestPrice = na
+    int bestTouches = 0
+    int bestIndex = na
+    float bestDistance = 1e20
+    if array.size(liquidityPools) > 0
+        for i = 0 to array.size(liquidityPools) - 1
+            LiquidityPool poolValue = array.get(liquidityPools, i)
+            if poolValue.active and poolValue.side == sideValue and poolValue.touches >= liquidityPoolMinimumTouches and bar_index - poolValue.lastTouchBar <= liquidityPoolLookbackBars
+                float distance = math.abs(referencePrice - poolValue.price)
+                if poolValue.touches > bestTouches or (poolValue.touches == bestTouches and distance < bestDistance)
+                    bestPrice := poolValue.price
+                    bestTouches := poolValue.touches
+                    bestIndex := i
+                    bestDistance := distance
+    [bestPrice, bestTouches, bestIndex]
+
+f_pool_near_zone(Zone zoneValue) =>
+    int requiredSide = zoneValue.direction == DIR_BULL ? POOL_SUPPORT : POOL_RESISTANCE
+    float tolerance = liquidityPoolToleranceTicks * syminfo.mintick
+    int bestTouches = 0
+    float bestPrice = na
+    if array.size(liquidityPools) > 0
+        for i = 0 to array.size(liquidityPools) - 1
+            LiquidityPool poolValue = array.get(liquidityPools, i)
+            bool inRange = poolValue.price >= zoneValue.bottom - tolerance and poolValue.price <= zoneValue.top + tolerance
+            if poolValue.active and poolValue.side == requiredSide and poolValue.touches >= liquidityPoolMinimumTouches and inRange and poolValue.touches > bestTouches
+                bestTouches := poolValue.touches
+                bestPrice := poolValue.price
+    [bestPrice, bestTouches]
+
+f_nearest_pool_objective(int directionValue, float entryPriceValue) =>
+    int requiredSide = directionValue == DIR_BULL ? POOL_RESISTANCE : POOL_SUPPORT
+    float bestPrice = na
+    float bestDistance = 1e20
+    if array.size(liquidityPools) > 0
+        for i = 0 to array.size(liquidityPools) - 1
+            LiquidityPool poolValue = array.get(liquidityPools, i)
+            bool validDirection = directionValue == DIR_BULL ? poolValue.price > entryPriceValue : poolValue.price < entryPriceValue
+            if poolValue.active and poolValue.side == requiredSide and poolValue.touches >= liquidityPoolMinimumTouches and validDirection
+                float distance = math.abs(poolValue.price - entryPriceValue)
+                if distance < bestDistance
+                    bestDistance := distance
+                    bestPrice := poolValue.price
+    bestPrice
+
+f_objective_distance(int directionValue, float entryPriceValue, float pdhValue, float pdlValue, float pwhValue, float pwlValue, float onhValue, float onlValue, float orhValue, float orlValue, float supportPoolValue, float resistancePoolValue) =>
+    float result = na
+    float poolObjective = directionValue == DIR_BULL ? resistancePoolValue : supportPoolValue
+    float[] references = array.from(pdhValue, pdlValue, pwhValue, pwlValue, onhValue, onlValue, orhValue, orlValue, poolObjective)
+    for i = 0 to array.size(references) - 1
+        float levelValue = array.get(references, i)
+        if not na(levelValue)
+            bool valid = directionValue == DIR_BULL ? levelValue > entryPriceValue : levelValue < entryPriceValue
+            float distance = math.abs(levelValue - entryPriceValue)
+            if valid and (na(result) or distance < result)
+                result := distance
+    result
+
+f_auto_max_stop_ticks() =>
+    string rootValue = str.upper(syminfo.root)
+    rootValue == "NQ" or rootValue == "MNQ" ? 32 : rootValue == "ES" or rootValue == "MES" ? 12 : 32
+
+f_stop_valid(int directionValue, float entryPriceValue, float stopPriceValue, float atrValue) =>
+    float risk = math.abs(entryPriceValue - stopPriceValue)
+    float riskTicks = risk / syminfo.mintick
+    float riskAtr = atrValue > 0 ? risk / atrValue : na
+    int maxTicks = stopLimitMode == "Automatic" ? f_auto_max_stop_ticks() : customMaxStopTicks
+    bool sideValid = directionValue == DIR_BULL ? stopPriceValue < entryPriceValue : stopPriceValue > entryPriceValue
+    bool limitsValid = stopLimitMode == "Off" or (riskTicks >= 2 and riskTicks <= maxTicks and (na(riskAtr) or riskAtr <= maximumStopAtr))
+    sideValid and risk > syminfo.mintick and limitsValid
+
+f_entry_trigger(Zone zoneValue) =>
+    bool intersects = low <= zoneValue.top and high >= zoneValue.bottom
+    bool result = false
+    if entryMode == "First touch"
+        result := intersects
+    else if entryMode == "Midpoint reclaim"
+        result := zoneValue.direction == DIR_BULL ? intersects and low <= zoneValue.midpoint and close > zoneValue.midpoint : intersects and high >= zoneValue.midpoint and close < zoneValue.midpoint
+    else
+        result := zoneValue.direction == DIR_BULL ? intersects and close > zoneValue.midpoint and close > open : intersects and close < zoneValue.midpoint and close < open
+    result
+
+f_set_trade_end(Trade tradeValue, int endTime) =>
+    if not na(tradeValue.setupBox)
+        box.set_right(tradeValue.setupBox, endTime)
+    if not na(tradeValue.riskBox)
+        box.set_right(tradeValue.riskBox, endTime)
+    if not na(tradeValue.reward1Box)
+        box.set_right(tradeValue.reward1Box, endTime)
+    if not na(tradeValue.reward15Box)
+        box.set_right(tradeValue.reward15Box, endTime)
+    if not na(tradeValue.reward2Box)
+        box.set_right(tradeValue.reward2Box, endTime)
+    if not na(tradeValue.stopLine)
+        line.set_x2(tradeValue.stopLine, endTime)
+    if not na(tradeValue.target1Line)
+        line.set_x2(tradeValue.target1Line, endTime)
+    if not na(tradeValue.target15Line)
+        line.set_x2(tradeValue.target15Line, endTime)
+    if not na(tradeValue.target2Line)
+        line.set_x2(tradeValue.target2Line, endTime)
+    if not na(tradeValue.stopLabel)
+        label.set_x(tradeValue.stopLabel, endTime)
+    if not na(tradeValue.target1Label)
+        label.set_x(tradeValue.target1Label, endTime)
+    if not na(tradeValue.target15Label)
+        label.set_x(tradeValue.target15Label, endTime)
+    if not na(tradeValue.target2Label)
+        label.set_x(tradeValue.target2Label, endTime)
+
+f_fade_trade(Trade tradeValue) =>
+    if not na(tradeValue.setupBox)
+        box.set_bgcolor(tradeValue.setupBox, color.new(neutralColor, historicalTransparency))
+        box.set_border_color(tradeValue.setupBox, color.new(neutralColor, 100))
+    if not na(tradeValue.riskBox)
+        box.set_bgcolor(tradeValue.riskBox, color.new(riskColor, historicalTransparency))
+    if not na(tradeValue.reward1Box)
+        box.set_bgcolor(tradeValue.reward1Box, color.new(rewardColor, historicalTransparency))
+    if not na(tradeValue.reward15Box)
+        box.set_bgcolor(tradeValue.reward15Box, color.new(rewardColor, historicalTransparency))
+    if not na(tradeValue.reward2Box)
+        box.set_bgcolor(tradeValue.reward2Box, color.new(rewardColor, historicalTransparency))
+    if not na(tradeValue.stopLine)
+        line.set_color(tradeValue.stopLine, color.new(stopColor, 60))
+    if not na(tradeValue.target1Line)
+        line.set_color(tradeValue.target1Line, color.new(targetColor, 60))
+    if not na(tradeValue.target15Line)
+        line.set_color(tradeValue.target15Line, color.new(targetColor, 68))
+    if not na(tradeValue.target2Line)
+        line.set_color(tradeValue.target2Line, color.new(targetColor, 74))
+    if not na(tradeValue.signalLabel)
+        label.set_color(tradeValue.signalLabel, color.new(tradeValue.direction == DIR_BULL ? bullishSignalColor : bearishSignalColor, 72))
+
+f_send_json(string eventName, string eventId, int directionValue, string zoneTypeValue, int scoreValue, float priceValue, string detailValue) =>
+    if enableAlerts and enableJsonAlerts
+        string payload = "{" +
+             "\"schema\":\"meridian.futures_setups.event.v3\"," +
+             "\"version\":\"" + VERSION + "\"," +
+             "\"build\":\"" + (RESEARCH_BUILD ? "research" : "daily") + "\"," +
+             "\"event\":\"" + f_json_safe(eventName) + "\"," +
+             "\"event_id\":\"" + f_json_safe(eventId) + "\"," +
+             "\"symbol\":\"" + f_json_safe(syminfo.tickerid) + "\"," +
+             "\"timeframe\":\"" + f_json_safe(timeframe.period) + "\"," +
+             "\"direction\":\"" + f_direction_text(directionValue) + "\"," +
+             "\"zone_type\":\"" + f_json_safe(zoneTypeValue) + "\"," +
+             "\"score\":" + str.tostring(scoreValue) + "," +
+             "\"price\":" + str.tostring(priceValue, format.mintick) + "," +
+             "\"time\":" + str.tostring(time) + "," +
+             "\"detail\":\"" + f_json_safe(detailValue) + "\"}"
+        alert(payload, alert.freq_once_per_bar_close)
+
+string rootSymbol = str.upper(syminfo.root)
+bool chartIsNq = rootSymbol == "NQ" or rootSymbol == "MNQ"
+bool chartIsEs = rootSymbol == "ES" or rootSymbol == "MES"
+bool supportedSymbol = chartIsNq or chartIsEs
+int chartMinutes = timeframe.isintraday ? int(math.round(timeframe.in_seconds() / 60.0)) : 0
+bool supportedTimeframe = timeframe.isintraday and (chartMinutes == 1 or allowNonOneMinuteCharts and chartMinutes >= 1 and chartMinutes <= 5)
+bool engineSupported = (supportedSymbol or allowUnsupportedSymbols) and supportedTimeframe
+
+bool inFutures = f_in_session(futuresSession)
+bool inOvernight = f_in_session(overnightSession)
+bool inRth = f_in_session(rthSession)
+bool inSignalWindow = f_in_session(signalSession)
+int dateKey = f_date_key()
+bool newTradingDay = ta.change(time_tradingday) != 0
+bool newFuturesSession = inFutures and (not inFutures[1] or newTradingDay)
+bool newOvernight = inOvernight and (not inOvernight[1] or newTradingDay)
+bool newRth = inRth and (not inRth[1] or dateKey != dateKey[1])
+
+float atr = ta.atr(atrLength)
+float rsiValue = ta.rsi(close, rsiLength)
+float zMean = ta.sma(close, zScoreLength)
+float zStd = ta.stdev(close, zScoreLength)
+float zScore = not na(zStd) and zStd > 0 ? (close - zMean) / zStd : na
+
+var float futuresPv = 0.0
+var float futuresVolume = 0.0
+var float rthPv = 0.0
+var float rthVolume = 0.0
+if newFuturesSession
+    futuresPv := hlc3 * volume
+    futuresVolume := volume
+else if inFutures
+    futuresPv += hlc3 * volume
+    futuresVolume += volume
+if newRth
+    rthPv := hlc3 * volume
+    rthVolume := volume
+else if inRth
+    rthPv += hlc3 * volume
+    rthVolume += volume
+float futuresVwap = futuresVolume > 0 ? futuresPv / futuresVolume : na
+float rthVwap = rthVolume > 0 ? rthPv / rthVolume : na
+float activeVwap = inRth and not na(rthVwap) ? rthVwap : futuresVwap
+
+int localMinuteOfDay = hour(time, sessionTimezone) * 60 + minute(time, sessionTimezone)
+int minutesSinceFuturesOpen = localMinuteOfDay >= 18 * 60 ? localMinuteOfDay - 18 * 60 : localMinuteOfDay + 6 * 60
+int sessionSlot = chartMinutes > 0 ? int(math.floor(minutesSinceFuturesOpen / chartMinutes)) : -1
+bool validSessionSlot = inFutures and sessionSlot >= 0 and sessionSlot < MAX_SESSION_SLOTS
+var float[] rvolHistory = array.new_float(MAX_SESSION_SLOTS * MAX_RVOL_SESSIONS, na)
+var float[] rvolSums = array.new_float(MAX_SESSION_SLOTS, 0.0)
+var int[] rvolCounts = array.new_int(MAX_SESSION_SLOTS, 0)
+var int[] rvolWritePositions = array.new_int(MAX_SESSION_SLOTS, 0)
+float rvolAverage = validSessionSlot and array.get(rvolCounts, sessionSlot) >= rvolMinimumSamples ? array.get(rvolSums, sessionSlot) / array.get(rvolCounts, sessionSlot) : na
+float rvol = validSessionSlot and not na(rvolAverage) and rvolAverage > 0 ? volume / rvolAverage : na
+if barstate.isconfirmed and validSessionSlot
+    int writePosition = array.get(rvolWritePositions, sessionSlot)
+    int historyIndex = sessionSlot * MAX_RVOL_SESSIONS + writePosition
+    float oldVolume = array.get(rvolHistory, historyIndex)
+    float newSum = array.get(rvolSums, sessionSlot) - nz(oldVolume) + volume
+    int newCount = array.get(rvolCounts, sessionSlot) + (na(oldVolume) ? 1 : 0)
+    array.set(rvolHistory, historyIndex, volume)
+    array.set(rvolSums, sessionSlot, newSum)
+    array.set(rvolCounts, sessionSlot, math.min(newCount, rvolBaselineSessions))
+    array.set(rvolWritePositions, sessionSlot, (writePosition + 1) % rvolBaselineSessions)
+
+var float overnightHigh = na
+var float overnightLow = na
+var float openingRangeHigh = na
+var float openingRangeLow = na
+var bool openingRangeComplete = false
+if newOvernight
+    overnightHigh := high
+    overnightLow := low
+else if inOvernight
+    overnightHigh := na(overnightHigh) ? high : math.max(overnightHigh, high)
+    overnightLow := na(overnightLow) ? low : math.min(overnightLow, low)
+
+bool inOpeningRange = inRth and f_window_active(9, 30, openingRangeMinutes)
+if newRth
+    openingRangeHigh := high
+    openingRangeLow := low
+    openingRangeComplete := false
+else if inOpeningRange
+    openingRangeHigh := math.max(nz(openingRangeHigh, high), high)
+    openingRangeLow := math.min(nz(openingRangeLow, low), low)
+else if inRth and not openingRangeComplete and not na(openingRangeHigh)
+    openingRangeComplete := true
+
+[pdh, pdl] = request.security(syminfo.tickerid, "1D", [high[1], low[1]], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+[pwh, pwl] = request.security(syminfo.tickerid, "1W", [high[1], low[1]], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+
+[bF5, bFT5, bFB5, bFTm5, sF5, sFT5, sFB5, sFTm5, bO5, bOT5, bOB5, bOTm5, sO5, sOT5, sOB5, sOTm5, a5, c5, e205, e505, r5] = request.security(syminfo.tickerid, "5", f_htf_payload(), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+[bF15, bFT15, bFB15, bFTm15, sF15, sFT15, sFB15, sFTm15, bO15, bOT15, bOB15, bOTm15, sO15, sOT15, sOB15, sOTm15, a15, c15, e2015, e5015, r15] = request.security(syminfo.tickerid, "15", f_htf_payload(), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+[bF30, bFT30, bFB30, bFTm30, sF30, sFT30, sFB30, sFTm30, bO30, bOT30, bOB30, bOTm30, sO30, sOT30, sOB30, sOTm30, a30, c30, e2030, e5030, r30] = request.security(syminfo.tickerid, "30", f_htf_payload(), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+[bF60, bFT60, bFB60, bFTm60, sF60, sFT60, sFB60, sFTm60, bO60, bOT60, bOB60, bOTm60, sO60, sOT60, sOB60, sOTm60, a60, c60, e2060, e5060, r60] = request.security(syminfo.tickerid, "60", f_htf_payload(), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+[bF240, bFT240, bFB240, bFTm240, sF240, sFT240, sFB240, sFTm240, bO240, bOT240, bOB240, bOTm240, sO240, sOT240, sOB240, sOTm240, a240, c240, e20240, e50240, r240] = request.security(syminfo.tickerid, "240", f_htf_payload(), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+
+if engineSupported
+    f_register_payload(use5m, "5", bF5, bFT5, bFB5, bFTm5, sF5, sFT5, sFB5, sFTm5, bO5, bOT5, bOB5, bOTm5, sO5, sOT5, sOB5, sOTm5, a5)
+    f_register_payload(use15m, "15", bF15, bFT15, bFB15, bFTm15, sF15, sFT15, sFB15, sFTm15, bO15, bOT15, bOB15, bOTm15, sO15, sOT15, sOB15, sOTm15, a15)
+    f_register_payload(use30m, "30", bF30, bFT30, bFB30, bFTm30, sF30, sFT30, sFB30, sFTm30, bO30, bOT30, bOB30, bOTm30, sO30, sOT30, sOB30, sOTm30, a30)
+    f_register_payload(use1h, "60", bF60, bFT60, bFB60, bFTm60, sF60, sFT60, sFB60, sFTm60, bO60, bOT60, bOB60, bOTm60, sO60, sOT60, sOB60, sOTm60, a60)
+    f_register_payload(use4h, "240", bF240, bFT240, bFB240, bFTm240, sF240, sFT240, sFB240, sFTm240, bO240, bOT240, bOB240, bOTm240, sO240, sOT240, sOB240, sOTm240, a240)
+
+float chartRange = high - low
+float chartBody = math.abs(close - open)
+float chartBodyFraction = chartRange > 0 ? chartBody / chartRange : 0.0
+bool chartBullDisp = close > open and chartBody >= atr * htfDisplacementAtr and chartBodyFraction >= htfDisplacementBodyFraction
+bool chartBearDisp = close < open and chartBody >= atr * htfDisplacementAtr and chartBodyFraction >= htfDisplacementBodyFraction
+bool chartBullFvg = barstate.isconfirmed and low > high[2]
+bool chartBearFvg = barstate.isconfirmed and high < low[2]
+bool chartBullOb = barstate.isconfirmed and chartBullDisp and close > ta.highest(high[1], htfBosLookback) and close[1] < open[1]
+bool chartBearOb = barstate.isconfirmed and chartBearDisp and close < ta.lowest(low[1], htfBosLookback) and close[1] > open[1]
+if engineSupported and useChartZones
+    if chartBullFvg
+        f_register_zone("FVG", DIR_BULL, timeframe.period, low, high[2], time[2], atr, 1.0)
+    if chartBearFvg
+        f_register_zone("FVG", DIR_BEAR, timeframe.period, low[2], high, time[2], atr, 1.0)
+    if chartBullOb
+        f_register_zone("OB", DIR_BULL, timeframe.period, high[1], low[1], time[1], atr, 1.0)
+    if chartBearOb
+        f_register_zone("OB", DIR_BEAR, timeframe.period, high[1], low[1], time[1], atr, 1.0)
+
+float pivotHigh = ta.pivothigh(high, pivotLeft, pivotRight)
+float pivotLow = ta.pivotlow(low, pivotLeft, pivotRight)
+var float latestSwingHigh = na
+var float previousSwingHigh = na
+var float latestSwingLow = na
+var float previousSwingLow = na
+var int lastBullStructureBar = na
+var int lastBearStructureBar = na
+var int lastBullStructureTime = na
+var int lastBearStructureTime = na
+var string lastBullStructureType = ""
+var string lastBearStructureType = ""
+var int structuralLegId = 0
+var int trendDirection = DIR_NONE
+
+if barstate.isconfirmed and not na(pivotHigh)
+    previousSwingHigh := latestSwingHigh
+    latestSwingHigh := pivotHigh
+    int pivotOriginBarHigh = bar_index - pivotRight
+    int pivotOriginTimeHigh = time[pivotRight]
+    array.push(pivotMarks, PivotMark.new(pivotHigh, DIR_BULL, pivotOriginBarHigh, pivotOriginTimeHigh))
+    if useLiquidityPools
+        f_register_liquidity_pool(POOL_RESISTANCE, pivotHigh, pivotOriginBarHigh, pivotOriginTimeHigh)
+if barstate.isconfirmed and not na(pivotLow)
+    previousSwingLow := latestSwingLow
+    latestSwingLow := pivotLow
+    int pivotOriginBarLow = bar_index - pivotRight
+    int pivotOriginTimeLow = time[pivotRight]
+    array.push(pivotMarks, PivotMark.new(pivotLow, DIR_BEAR, pivotOriginBarLow, pivotOriginTimeLow))
+    if useLiquidityPools
+        f_register_liquidity_pool(POOL_SUPPORT, pivotLow, pivotOriginBarLow, pivotOriginTimeLow)
+while array.size(pivotMarks) > MAX_PIVOTS
+    array.shift(pivotMarks)
+
+bool bullStructureEvent = barstate.isconfirmed and not na(latestSwingHigh) and close > latestSwingHigh and close[1] <= latestSwingHigh
+bool bearStructureEvent = barstate.isconfirmed and not na(latestSwingLow) and close < latestSwingLow and close[1] >= latestSwingLow
+if bullStructureEvent
+    lastBullStructureType := trendDirection == DIR_BEAR ? "MSS" : "BOS"
+    lastBullStructureBar := bar_index
+    lastBullStructureTime := time_close
+    trendDirection := DIR_BULL
+    structuralLegId += 1
+if bearStructureEvent
+    lastBearStructureType := trendDirection == DIR_BULL ? "MSS" : "BOS"
+    lastBearStructureBar := bar_index
+    lastBearStructureTime := time_close
+    trendDirection := DIR_BEAR
+    structuralLegId += 1
+
+float executionRange = high - low
+float executionBody = math.abs(close - open)
+float executionBodyFrac = executionRange > 0 ? executionBody / executionRange : 0.0
+bool bullDisplacement = barstate.isconfirmed and close > open and executionBody >= atr * executionDisplacementAtr and executionBodyFrac >= executionBodyFraction
+bool bearDisplacement = barstate.isconfirmed and close < open and executionBody >= atr * executionDisplacementAtr and executionBodyFrac >= executionBodyFraction
+var int lastBullDisplacementBar = na
+var int lastBearDisplacementBar = na
+var int lastBullDisplacementTime = na
+var int lastBearDisplacementTime = na
+if bullDisplacement
+    lastBullDisplacementBar := bar_index
+    lastBullDisplacementTime := time_close
+if bearDisplacement
+    lastBearDisplacementBar := bar_index
+    lastBearDisplacementTime := time_close
+
+float poolTolerance = liquidityPoolToleranceTicks * syminfo.mintick
+bool bullPoolSweep = false
+bool bearPoolSweep = false
+var float lastBullPoolSweepPrice = na
+var float lastBearPoolSweepPrice = na
+var int lastBullPoolSweepTouches = 0
+var int lastBearPoolSweepTouches = 0
+if barstate.isconfirmed and useLiquidityPools and array.size(liquidityPools) > 0
+    float breakDistance = liquidityPoolBreakTicks * syminfo.mintick
+    for poolIndex = array.size(liquidityPools) - 1 to 0
+        LiquidityPool poolValue = array.get(liquidityPools, poolIndex)
+        if poolValue.active
+            bool tooOld = bar_index - poolValue.lastTouchBar > liquidityPoolLookbackBars
+            bool supportSweep = poolValue.side == POOL_SUPPORT and poolValue.touches >= liquidityPoolMinimumTouches and low < poolValue.price - syminfo.mintick and close > poolValue.price
+            bool resistanceSweep = poolValue.side == POOL_RESISTANCE and poolValue.touches >= liquidityPoolMinimumTouches and high > poolValue.price + syminfo.mintick and close < poolValue.price
+            bool supportBroken = poolValue.side == POOL_SUPPORT and close < poolValue.price - breakDistance
+            bool resistanceBroken = poolValue.side == POOL_RESISTANCE and close > poolValue.price + breakDistance
+            if supportSweep
+                bullPoolSweep := true
+                lastBullPoolSweepPrice := poolValue.price
+                lastBullPoolSweepTouches := poolValue.touches
+                poolValue.active := false
+                poolValue.terminalTime := time_close
+                f_delete_pool_drawings(poolValue)
+            else if resistanceSweep
+                bearPoolSweep := true
+                lastBearPoolSweepPrice := poolValue.price
+                lastBearPoolSweepTouches := poolValue.touches
+                poolValue.active := false
+                poolValue.terminalTime := time_close
+                f_delete_pool_drawings(poolValue)
+            else if supportBroken or resistanceBroken or tooOld
+                poolValue.active := false
+                poolValue.terminalTime := time_close
+                f_delete_pool_drawings(poolValue)
+
+[lowPoolPrice, lowPoolTouches, lowPoolIndex] = f_best_active_pool(POOL_SUPPORT, close)
+[highPoolPrice, highPoolTouches, highPoolIndex] = f_best_active_pool(POOL_RESISTANCE, close)
+
+bool bullStaticSweep = barstate.isconfirmed and ((not na(overnightLow) and low < overnightLow and close > overnightLow) or (not na(pdl) and low < pdl and close > pdl) or (not na(pwl) and low < pwl and close > pwl) or (openingRangeComplete and low < openingRangeLow and close > openingRangeLow))
+bool bearStaticSweep = barstate.isconfirmed and ((not na(overnightHigh) and high > overnightHigh and close < overnightHigh) or (not na(pdh) and high > pdh and close < pdh) or (not na(pwh) and high > pwh and close < pwh) or (openingRangeComplete and high > openingRangeHigh and close < openingRangeHigh))
+var int lastBullLiquidityBar = na
+var int lastBearLiquidityBar = na
+if bullPoolSweep or bullStaticSweep
+    lastBullLiquidityBar := bar_index
+if bearPoolSweep or bearStaticSweep
+    lastBearLiquidityBar := bar_index
+
+bool bullVwapReject = barstate.isconfirmed and useVwap and not na(activeVwap) and low <= activeVwap and close > activeVwap and close > open
+bool bearVwapReject = barstate.isconfirmed and useVwap and not na(activeVwap) and high >= activeVwap and close < activeVwap and close < open
+bool bullZReversal = useZScore and not na(zScore) and zScore[1] <= -zScoreExtreme and zScore > zScore[1]
+bool bearZReversal = useZScore and not na(zScore) and zScore[1] >= zScoreExtreme and zScore < zScore[1]
+bool bullRsiContext = useRsi and (rsiValue[1] < 35 and rsiValue > rsiValue[1] or rsiValue > 50 and rsiValue > rsiValue[1])
+bool bearRsiContext = useRsi and (rsiValue[1] > 65 and rsiValue < rsiValue[1] or rsiValue < 50 and rsiValue < rsiValue[1])
+bool bullPo3 = usePowerOfThree and bullStaticSweep and close > futuresVwap
+bool bearPo3 = usePowerOfThree and bearStaticSweep and close < futuresVwap
+bool bullOrb = useOpeningRange and openingRangeComplete and close > openingRangeHigh and low <= openingRangeHigh
+bool bearOrb = useOpeningRange and openingRangeComplete and close < openingRangeLow and high >= openingRangeLow
+
+string smtPairSymbol = automaticSmtPair ? (chartIsNq ? "CME_MINI:ES1!" : chartIsEs ? "CME_MINI:NQ1!" : manualSmtSymbol) : manualSmtSymbol
+[pairPivotHigh, pairPivotLow] = request.security(smtPairSymbol, timeframe.period, [ta.pivothigh(high, smtPivotLength, smtPivotLength), ta.pivotlow(low, smtPivotLength, smtPivotLength)], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_off)
+float chartSmtHigh = ta.pivothigh(high, smtPivotLength, smtPivotLength)
+float chartSmtLow = ta.pivotlow(low, smtPivotLength, smtPivotLength)
+var float previousChartSmtHigh = na
+var float latestChartSmtHigh = na
+var float previousPairSmtHigh = na
+var float latestPairSmtHigh = na
+var float previousChartSmtLow = na
+var float latestChartSmtLow = na
+var float previousPairSmtLow = na
+var float latestPairSmtLow = na
+var int latestChartHighEventBar = na
+var int latestPairHighEventBar = na
+var int latestChartLowEventBar = na
+var int latestPairLowEventBar = na
+var int lastBearSmtBar = na
+var int lastBullSmtBar = na
+bool chartHighUpdated = barstate.isconfirmed and not na(chartSmtHigh)
+bool pairHighUpdated = barstate.isconfirmed and not na(pairPivotHigh)
+bool chartLowUpdated = barstate.isconfirmed and not na(chartSmtLow)
+bool pairLowUpdated = barstate.isconfirmed and not na(pairPivotLow)
+if chartHighUpdated
+    previousChartSmtHigh := latestChartSmtHigh
+    latestChartSmtHigh := chartSmtHigh
+    latestChartHighEventBar := bar_index
+if pairHighUpdated
+    previousPairSmtHigh := latestPairSmtHigh
+    latestPairSmtHigh := pairPivotHigh
+    latestPairHighEventBar := bar_index
+if chartLowUpdated
+    previousChartSmtLow := latestChartSmtLow
+    latestChartSmtLow := chartSmtLow
+    latestChartLowEventBar := bar_index
+if pairLowUpdated
+    previousPairSmtLow := latestPairSmtLow
+    latestPairSmtLow := pairPivotLow
+    latestPairLowEventBar := bar_index
+bool highEventsAligned = not na(latestChartHighEventBar) and not na(latestPairHighEventBar) and math.abs(latestChartHighEventBar - latestPairHighEventBar) <= smtMaximumSeparationBars
+bool lowEventsAligned = not na(latestChartLowEventBar) and not na(latestPairLowEventBar) and math.abs(latestChartLowEventBar - latestPairLowEventBar) <= smtMaximumSeparationBars
+if useSmt and (chartHighUpdated or pairHighUpdated) and highEventsAligned and not na(previousChartSmtHigh) and not na(latestChartSmtHigh) and not na(previousPairSmtHigh) and not na(latestPairSmtHigh)
+    bool chartHigher = latestChartSmtHigh > previousChartSmtHigh
+    bool pairHigher = latestPairSmtHigh > previousPairSmtHigh
+    if chartHigher != pairHigher
+        lastBearSmtBar := bar_index
+if useSmt and (chartLowUpdated or pairLowUpdated) and lowEventsAligned and not na(previousChartSmtLow) and not na(latestChartSmtLow) and not na(previousPairSmtLow) and not na(latestPairSmtLow)
+    bool chartLower = latestChartSmtLow < previousChartSmtLow
+    bool pairLower = latestPairSmtLow < previousPairSmtLow
+    if chartLower != pairLower
+        lastBullSmtBar := bar_index
+
+bool bullSmtRecent = useSmt and not na(lastBullSmtBar) and bar_index - lastBullSmtBar <= smtValidityBars
+bool bearSmtRecent = useSmt and not na(lastBearSmtBar) and bar_index - lastBearSmtBar <= smtValidityBars
+
+string executionTfLabel = chartMinutes == 1 ? "1M" : str.tostring(chartMinutes) + "M"
+float localEma20 = ta.ema(close, 20)
+float localEma50 = ta.ema(close, 50)
+int localRegimeScore = 0
+localRegimeScore += close > localEma20 and localEma20 > localEma50 ? 28 : close < localEma20 and localEma20 < localEma50 ? -28 : 0
+localRegimeScore += localEma20 > localEma20[3] ? 14 : localEma20 < localEma20[3] ? -14 : 0
+localRegimeScore += close > activeVwap ? 16 : close < activeVwap ? -16 : 0
+localRegimeScore += rsiValue >= 60 ? 16 : rsiValue >= 53 ? 8 : rsiValue <= 40 ? -16 : rsiValue <= 47 ? -8 : 0
+float localMomentum = atr > 0 ? (close - close[3]) / atr : 0.0
+localRegimeScore += localMomentum >= 1.0 ? 16 : localMomentum >= 0.35 ? 8 : localMomentum <= -1.0 ? -16 : localMomentum <= -0.35 ? -8 : 0
+if nz(rvol, 1.0) >= elevatedRvol
+    localRegimeScore += localRegimeScore > 0 ? 10 : localRegimeScore < 0 ? -10 : 0
+localRegimeScore := int(math.round(f_clamp(localRegimeScore, -100.0, 100.0)))
+int weightedRegimeScore = int(math.round((nz(r240) * 25.0 + nz(r60) * 20.0 + nz(r30) * 15.0 + nz(r15) * 15.0 + nz(r5) * 15.0 + localRegimeScore * 10.0) / 100.0))
+
+f_score_zone(Zone zoneValue) =>
+    int zonePoints = f_zone_base_points(zoneValue)
+    int overlapPoints = f_overlap_points(zoneValue)
+
+    int structureTimeValue = zoneValue.direction == DIR_BULL ? lastBullStructureTime : lastBearStructureTime
+    int structureBarValue = zoneValue.direction == DIR_BULL ? lastBullStructureBar : lastBearStructureBar
+    string structureTypeValue = zoneValue.direction == DIR_BULL ? lastBullStructureType : lastBearStructureType
+    bool immediateStructure = not na(structureBarValue) and bar_index - structureBarValue <= structureValidityBars
+    bool timedStructure = not na(structureTimeValue) and time_close - structureTimeValue <= structureValidityMinutes * 60 * 1000
+    bool sameLegStructure = zoneValue.structuralLegId > 0 and zoneValue.structuralLegId == structuralLegId and trendDirection == zoneValue.direction
+    bool structureRecent = immediateStructure or timedStructure or sameLegStructure
+    bool mssRecent = structureRecent and structureTypeValue == "MSS"
+
+    int displacementTimeValue = zoneValue.direction == DIR_BULL ? lastBullDisplacementTime : lastBearDisplacementTime
+    bool displacementRecent = not na(displacementTimeValue) and time_close - displacementTimeValue <= displacementValidityMinutes * 60 * 1000
+    int structurePoints = (mssRecent ? 14 : structureRecent ? 10 : trendDirection == zoneValue.direction ? 6 : 0) + (displacementRecent ? 6 : 0)
+    structurePoints := math.min(structurePoints, 20)
+
+    bool liquidityRecent = zoneValue.direction == DIR_BULL ? not na(lastBullLiquidityBar) and bar_index - lastBullLiquidityBar <= liquiditySweepValidityBars : not na(lastBearLiquidityBar) and bar_index - lastBearLiquidityBar <= liquiditySweepValidityBars
+    [poolPriceNear, poolTouchesNear] = f_pool_near_zone(zoneValue)
+    bool poolNearZone = useLiquidityPools and poolTouchesNear >= liquidityPoolMinimumTouches and not na(poolPriceNear)
+    float sweptPoolPrice = zoneValue.direction == DIR_BULL ? lastBullPoolSweepPrice : lastBearPoolSweepPrice
+    int sweptPoolTouches = zoneValue.direction == DIR_BULL ? lastBullPoolSweepTouches : lastBearPoolSweepTouches
+    bool sweptPoolNearZone = liquidityRecent and sweptPoolTouches >= liquidityPoolMinimumTouches and not na(sweptPoolPrice) and sweptPoolPrice >= zoneValue.bottom - poolTolerance and sweptPoolPrice <= zoneValue.top + poolTolerance
+    bool staticNearZone = f_near_price(zoneValue.midpoint, pdh, atr * 0.20) or f_near_price(zoneValue.midpoint, pdl, atr * 0.20) or f_near_price(zoneValue.midpoint, pwh, atr * 0.20) or f_near_price(zoneValue.midpoint, pwl, atr * 0.20) or f_near_price(zoneValue.midpoint, overnightHigh, atr * 0.20) or f_near_price(zoneValue.midpoint, overnightLow, atr * 0.20) or f_near_price(zoneValue.midpoint, openingRangeHigh, atr * 0.20) or f_near_price(zoneValue.midpoint, openingRangeLow, atr * 0.20) or f_near_price(zoneValue.midpoint, latestSwingHigh, atr * 0.15) or f_near_price(zoneValue.midpoint, latestSwingLow, atr * 0.15)
+    int poolStrengthPoints = poolNearZone ? math.min(7, 4 + math.max(0, poolTouchesNear - liquidityPoolMinimumTouches)) : 0
+    int liquidityPoints = (liquidityRecent ? 6 : 0) + (sweptPoolNearZone ? 3 : 0) + poolStrengthPoints + (staticNearZone ? 3 : 0) + (zoneValue.touchCount <= 1 ? 1 : 0)
+    liquidityPoints := math.min(liquidityPoints, 15)
+
+    bool vwapAligned = zoneValue.direction == DIR_BULL ? bullVwapReject or f_near_price(zoneValue.midpoint, activeVwap, atr * 0.15) and close >= activeVwap : bearVwapReject or f_near_price(zoneValue.midpoint, activeVwap, atr * 0.15) and close <= activeVwap
+    bool zAligned = zoneValue.direction == DIR_BULL ? bullZReversal : bearZReversal
+    bool rsiAligned = zoneValue.direction == DIR_BULL ? bullRsiContext : bearRsiContext
+    int directionalRegime = zoneValue.direction == DIR_BULL ? weightedRegimeScore : -weightedRegimeScore
+    int regimePoints = directionalRegime >= 55 ? 5 : directionalRegime >= 25 ? 3 : directionalRegime <= -25 ? -2 : 0
+    int contextPoints = (vwapAligned ? 4 : 0) + regimePoints + (zAligned ? 1 : 0) + (rsiAligned ? 1 : 0) + (useRvol and nz(rvol) >= elevatedRvol ? 1 : 0)
+    contextPoints := int(f_clamp(contextPoints, 0.0, 10.0))
+
+    bool smtAligned = zoneValue.direction == DIR_BULL ? bullSmtRecent : bearSmtRecent
+    bool po3Aligned = zoneValue.direction == DIR_BULL ? bullPo3 : bearPo3
+    bool orbAligned = zoneValue.direction == DIR_BULL ? bullOrb : bearOrb
+    int intermarketPoints = (smtAligned ? 3 : 0) + (po3Aligned ? 2 : 0) + (orbAligned ? 2 : 0)
+    intermarketPoints := math.min(intermarketPoints, 5)
+
+    int totalScore = math.min(zonePoints + overlapPoints + structurePoints + liquidityPoints + contextPoints + intermarketPoints, 100)
+    int categories = 1 + (overlapPoints > 0 ? 1 : 0) + (structurePoints >= 10 ? 1 : 0) + (liquidityPoints > 0 ? 1 : 0) + (contextPoints > 0 ? 1 : 0) + (intermarketPoints > 0 ? 1 : 0)
+    string breakdown = "Z " + str.tostring(zonePoints) + " · MTF " + str.tostring(overlapPoints) + " · S " + str.tostring(structurePoints) + " · L " + str.tostring(liquidityPoints) + " · C " + str.tostring(contextPoints) + " · X " + str.tostring(intermarketPoints)
+    [totalScore, categories, breakdown, structureRecent, displacementRecent]
+
+var int lastBullTradeBar = na
+var int lastBearTradeBar = na
+var int lastBullTradeLeg = na
+var int lastBearTradeLeg = na
+var int latestCandidateScore = na
+var int latestCandidateCategories = na
+var string latestCandidateBreakdown = ""
+var string latestCandidateReason = ""
+var string latestCandidateZone = ""
+var int detectedCandidateCount = 0
+var int liveSignalCount = 0
+var int winnerCount = 0
+var int stoppedCount = 0
+
+bool buySignalEvent = false
+bool sellSignalEvent = false
+bool targetEvent = false
+bool stopEvent = false
+bool researchCandidateEvent = false
+
+int bestZoneIndex = na
+int bestScore = -1
+int researchBestScore = -1
+int bestCategories = 0
+string bestBreakdown = ""
+bool bestStructureRecent = false
+bool bestDisplacementRecent = false
+float bestStop = na
+float bestRisk = na
+
+if barstate.isconfirmed and array.size(zones) > 0
+    for i = array.size(zones) - 1 to 0
+        Zone zoneValue = array.get(zones, i)
+        if zoneValue.state == Z_ACTIVE
+            bool closeInvalid = zoneValue.direction == DIR_BULL ? close < zoneValue.bottom : close > zoneValue.top
+            if closeInvalid
+                string transformedType = zoneValue.zoneType == "FVG" and enableIfvg ? "IFVG" : zoneValue.zoneType == "OB" and enableBb ? "BB" : ""
+                int originalDirection = zoneValue.direction
+                float originalTop = zoneValue.top
+                float originalBottom = zoneValue.bottom
+                string originalSourceTf = zoneValue.sourceTf
+                float originalAtr = zoneValue.sourceAtr
+
+                zoneValue.state := Z_INVALID
+                zoneValue.terminalTime := time_close
+                zoneValue.rejectionReason := transformedType != "" ? "Inverted to " + transformedType : "Closed through invalidation"
+                f_delete_zone_drawings(zoneValue)
+
+                if transformedType != ""
+                    f_register_zone(transformedType, -originalDirection, originalSourceTf, originalTop, originalBottom, time, originalAtr, transformedZoneLifetimePercent * 0.01)
+            else
+                bool intersects = low <= zoneValue.top and high >= zoneValue.bottom
+                float penetration = zoneValue.direction == DIR_BULL ? math.max(0.0, zoneValue.top - low) : math.max(0.0, high - zoneValue.bottom)
+                zoneValue.fillPercent := f_clamp(penetration / math.max(zoneValue.top - zoneValue.bottom, syminfo.mintick), 0.0, 1.0)
+                bool firstInteractionNow = intersects and not zoneValue.wasIntersecting and bar_index > zoneValue.detectedBar
+                if firstInteractionNow
+                    zoneValue.touchCount += 1
+                zoneValue.wasIntersecting := intersects
+
+                [scoreValue, categoryValue, breakdownValue, structureRecentValue, displacementRecentValue] = f_score_zone(zoneValue)
+                zoneValue.score := scoreValue
+                zoneValue.categoryCount := categoryValue
+                zoneValue.scoreBreakdown := breakdownValue
+                if zoneValue.structuralLegId == 0 and structureRecentValue and trendDirection == zoneValue.direction
+                    zoneValue.structuralLegId := structuralLegId
+                zoneValue.expiryTime := f_zone_expiry_time(zoneValue.detectedTime, zoneValue.sourceTf, scoreValue, zoneValue.lifetimeFactor)
+
+                if time_close > zoneValue.expiryTime
+                    zoneValue.state := Z_EXPIRED
+                    zoneValue.terminalTime := zoneValue.expiryTime
+                    zoneValue.rejectionReason := "Zone expired"
+                    f_delete_zone_drawings(zoneValue)
+                else
+                    bool entryTrigger = bar_index > zoneValue.detectedBar and f_entry_trigger(zoneValue)
+                    bool touchGate = zoneValue.touchCount > 0 and zoneValue.touchCount <= maximumEntryTouches
+                    bool structureGate = not requireStructure or structureRecentValue
+                    bool displacementGate = not requireDisplacement or displacementRecentValue
+                    bool cooldownGate = zoneValue.direction == DIR_BULL ? na(lastBullTradeBar) or bar_index - lastBullTradeBar > sameDirectionCooldownBars : na(lastBearTradeBar) or bar_index - lastBearTradeBar > sameDirectionCooldownBars
+                    bool legGate = not oneTradePerStructuralLeg or (zoneValue.direction == DIR_BULL ? na(lastBullTradeLeg) or lastBullTradeLeg != structuralLegId : na(lastBearTradeLeg) or lastBearTradeLeg != structuralLegId)
+                    float stopValue = zoneValue.direction == DIR_BULL ? zoneValue.bottom - stopBufferTicks * syminfo.mintick : zoneValue.top + stopBufferTicks * syminfo.mintick
+                    bool stopGate = f_stop_valid(zoneValue.direction, close, stopValue, atr)
+                    float riskValue = math.abs(close - stopValue)
+                    float nearestPoolObjective = usePoolsAsObjectives ? f_nearest_pool_objective(zoneValue.direction, close) : na
+                    float objectiveSupportPool = zoneValue.direction == DIR_BEAR ? nearestPoolObjective : na
+                    float objectiveResistancePool = zoneValue.direction == DIR_BULL ? nearestPoolObjective : na
+                    float objectiveDistance = f_objective_distance(zoneValue.direction, close, pdh, pdl, pwh, pwl, overnightHigh, overnightLow, openingRangeHigh, openingRangeLow, objectiveSupportPool, objectiveResistancePool)
+                    bool objectiveGate = minimumObjectiveR <= 0 or na(objectiveDistance) or riskValue <= 0 or objectiveDistance / riskValue >= minimumObjectiveR
+                    bool scoreGate = scoreValue >= minimumScore and categoryValue >= minimumCategories
+                    bool liveQualified = engineSupported and inSignalWindow and entryTrigger and touchGate and structureGate and displacementGate and cooldownGate and legGate and stopGate and objectiveGate and scoreGate and f_active_trade_count() < maximumActiveTrades
+
+                    if intersects and scoreValue > researchBestScore
+                        researchBestScore := scoreValue
+                        latestCandidateScore := scoreValue
+                        latestCandidateCategories := categoryValue
+                        latestCandidateBreakdown := breakdownValue
+                        latestCandidateZone := f_timeframe_label(zoneValue.sourceTf) + " " + zoneValue.zoneType
+                        latestCandidateReason := liveQualified ? "LIVE QUALIFIED" : not scoreGate ? "Score/categories" : not structureGate ? "No structure" : not displacementGate ? "No displacement" : not touchGate ? "Touch limit" : not stopGate ? "Stop invalid" : not objectiveGate ? "Objective too close" : not inSignalWindow ? "Outside signal window" : "Lifecycle gate"
+
+                    bool researchCandidate = RESEARCH_BUILD and intersects and scoreValue >= researchCandidateMinimum
+                    if researchCandidate and not zoneValue.candidateCounted
+                        researchCandidateEvent := true
+                        detectedCandidateCount += 1
+                        zoneValue.candidateCounted := true
+
+                    if liveQualified and scoreValue > bestScore
+                        bestZoneIndex := i
+                        bestScore := scoreValue
+                        bestCategories := categoryValue
+                        bestBreakdown := breakdownValue
+                        bestStructureRecent := structureRecentValue
+                        bestDisplacementRecent := displacementRecentValue
+                        bestStop := stopValue
+                        bestRisk := riskValue
+
+if barstate.isconfirmed and not na(bestZoneIndex) and f_active_trade_count() < maximumActiveTrades
+    Zone sourceZone = array.get(zones, bestZoneIndex)
+    int entryTimeValue = time_close
+    int plannedEnd = entryTimeValue + tradeDurationMinutes * 60 * 1000
+    float entryValue = close
+    float target1Value = sourceZone.direction == DIR_BULL ? entryValue + bestRisk : entryValue - bestRisk
+    float target15Value = sourceZone.direction == DIR_BULL ? entryValue + bestRisk * 1.5 : entryValue - bestRisk * 1.5
+    float target2Value = sourceZone.direction == DIR_BULL ? entryValue + bestRisk * 2.0 : entryValue - bestRisk * 2.0
+    color signalColor = sourceZone.direction == DIR_BULL ? bullishSignalColor : bearishSignalColor
+    color setupColor = sourceZone.direction == DIR_BULL ? bullishZoneColor : bearishZoneColor
+    string signalText = (sourceZone.direction == DIR_BULL ? "BUY" : "SELL") + " • " + str.tostring(bestScore)
+    string evidenceText = f_timeframe_label(sourceZone.sourceTf) + " " + sourceZone.zoneType + " · " + bestBreakdown
+    string tradeId = "MFS|" + str.tostring(time) + "|" + str.tostring(bar_index)
+
+    box setupBoxValue = box.new(entryTimeValue, sourceZone.top, plannedEnd, sourceZone.bottom, xloc = xloc.bar_time, bgcolor = color.new(setupColor, setupZoneTransparency), border_color = color.new(setupColor, 100), force_overlay = true)
+    box riskBoxValue = box.new(entryTimeValue, math.max(entryValue, bestStop), plannedEnd, math.min(entryValue, bestStop), xloc = xloc.bar_time, bgcolor = color.new(riskColor, riskTransparency), border_color = color.new(riskColor, 100), force_overlay = true)
+    box reward1Value = box.new(entryTimeValue, math.max(entryValue, target1Value), plannedEnd, math.min(entryValue, target1Value), xloc = xloc.bar_time, bgcolor = color.new(rewardColor, reward1Transparency), border_color = color.new(rewardColor, 100), force_overlay = true)
+    box reward15Value = box.new(entryTimeValue, math.max(target1Value, target15Value), plannedEnd, math.min(target1Value, target15Value), xloc = xloc.bar_time, bgcolor = color.new(rewardColor, reward15Transparency), border_color = color.new(rewardColor, 100), force_overlay = true)
+    box reward2Value = box.new(entryTimeValue, math.max(target15Value, target2Value), plannedEnd, math.min(target15Value, target2Value), xloc = xloc.bar_time, bgcolor = color.new(rewardColor, reward2Transparency), border_color = color.new(rewardColor, 100), force_overlay = true)
+    line stopLineValue = line.new(entryTimeValue, bestStop, plannedEnd, bestStop, xloc = xloc.bar_time, color = stopColor, width = lineWidth, force_overlay = true)
+    line target1LineValue = line.new(entryTimeValue, target1Value, plannedEnd, target1Value, xloc = xloc.bar_time, color = targetColor, width = lineWidth, force_overlay = true)
+    line target15LineValue = line.new(entryTimeValue, target15Value, plannedEnd, target15Value, xloc = xloc.bar_time, color = targetColor, width = lineWidth, force_overlay = true)
+    line target2LineValue = line.new(entryTimeValue, target2Value, plannedEnd, target2Value, xloc = xloc.bar_time, color = targetColor, width = lineWidth, force_overlay = true)
+    label signalLabelValue = label.new(entryTimeValue, entryValue, signalText, xloc = xloc.bar_time, style = sourceZone.direction == DIR_BULL ? label.style_label_up : label.style_label_down, color = color.new(signalColor, 5), textcolor = color.white, size = f_label_size(labelSizeInput), tooltip = evidenceText, force_overlay = true)
+    label stopLabelValue = label.new(plannedEnd, bestStop, "STOP", xloc = xloc.bar_time, style = label.style_label_left, color = color.new(color.black, 100), textcolor = stopColor, size = f_label_size(labelSizeInput), force_overlay = true)
+    label target1LabelValue = label.new(plannedEnd, target1Value, "1R", xloc = xloc.bar_time, style = label.style_label_left, color = color.new(color.black, 100), textcolor = targetColor, size = f_label_size(labelSizeInput), force_overlay = true)
+    label target15LabelValue = label.new(plannedEnd, target15Value, "1.5R", xloc = xloc.bar_time, style = label.style_label_left, color = color.new(color.black, 100), textcolor = targetColor, size = f_label_size(labelSizeInput), force_overlay = true)
+    label target2LabelValue = label.new(plannedEnd, target2Value, "2R", xloc = xloc.bar_time, style = label.style_label_left, color = color.new(color.black, 100), textcolor = targetColor, size = f_label_size(labelSizeInput), force_overlay = true)
+
+    Trade newTrade = Trade.new(
+         id = tradeId,
+         zoneId = sourceZone.id,
+         zoneType = sourceZone.zoneType,
+         sourceTf = sourceZone.sourceTf,
+         direction = sourceZone.direction,
+         state = T_ACTIVE,
+         score = bestScore,
+         categoryCount = bestCategories,
+         evidence = evidenceText,
+         entryTime = entryTimeValue,
+         entryBar = bar_index,
+         plannedEndTime = plannedEnd,
+         terminalTime = na,
+         entryPrice = entryValue,
+         stopPrice = bestStop,
+         target1 = target1Value,
+         target15 = target15Value,
+         target2 = target2Value,
+         target1Hit = false,
+         target15Hit = false,
+         setupBox = setupBoxValue,
+         riskBox = riskBoxValue,
+         reward1Box = reward1Value,
+         reward15Box = reward15Value,
+         reward2Box = reward2Value,
+         stopLine = stopLineValue,
+         target1Line = target1LineValue,
+         target15Line = target15LineValue,
+         target2Line = target2LineValue,
+         signalLabel = signalLabelValue,
+         stopLabel = stopLabelValue,
+         target1Label = target1LabelValue,
+         target15Label = target15LabelValue,
+         target2Label = target2LabelValue,
+         outcomeLabel = na)
+    array.push(trades, newTrade)
+    sourceZone.state := Z_TRIGGERED
+    sourceZone.terminalTime := entryTimeValue
+    sourceZone.structuralLegId := structuralLegId
+    if sourceZone.direction == DIR_BULL
+        lastBullTradeBar := bar_index
+        lastBullTradeLeg := structuralLegId
+        buySignalEvent := true
+    else
+        lastBearTradeBar := bar_index
+        lastBearTradeLeg := structuralLegId
+        sellSignalEvent := true
+    liveSignalCount += 1
+    if RESEARCH_BUILD
+        int scoreBucket = f_score_bucket(bestScore)
+        array.set(researchBucketSignals, scoreBucket, array.get(researchBucketSignals, scoreBucket) + 1)
+    if enableAlerts and alertSignals
+        f_send_json("signal", tradeId, sourceZone.direction, sourceZone.zoneType, bestScore, entryValue, evidenceText)
+
+if barstate.isconfirmed and array.size(trades) > 0
+    for i = array.size(trades) - 1 to 0
+        Trade tradeValue = array.get(trades, i)
+        if tradeValue.state == T_ACTIVE and bar_index > tradeValue.entryBar
+            bool stopHit = tradeValue.direction == DIR_BULL ? low <= tradeValue.stopPrice : high >= tradeValue.stopPrice
+            bool target2HitNow = tradeValue.direction == DIR_BULL ? high >= tradeValue.target2 : low <= tradeValue.target2
+            bool target15HitNow = tradeValue.direction == DIR_BULL ? high >= tradeValue.target15 : low <= tradeValue.target15
+            bool target1HitNow = tradeValue.direction == DIR_BULL ? high >= tradeValue.target1 : low <= tradeValue.target1
+            if stopHit
+                tradeValue.state := T_STOPPED
+                tradeValue.terminalTime := time_close
+                f_set_trade_end(tradeValue, time_close)
+                f_fade_trade(tradeValue)
+                tradeValue.outcomeLabel := label.new(time_close, tradeValue.stopPrice, "× -1R", xloc = xloc.bar_time, style = label.style_label_left, color = color.new(stopColor, 10), textcolor = color.white, size = f_label_size(labelSizeInput), force_overlay = true)
+                stoppedCount += 1
+                if RESEARCH_BUILD
+                    int scoreBucket = f_score_bucket(tradeValue.score)
+                    array.set(researchBucketStops, scoreBucket, array.get(researchBucketStops, scoreBucket) + 1)
+                stopEvent := true
+                if enableAlerts and alertStops
+                    f_send_json("stop", tradeValue.id, tradeValue.direction, tradeValue.zoneType, tradeValue.score, tradeValue.stopPrice, tradeValue.evidence)
+            else if target2HitNow
+                tradeValue.target1Hit := true
+                tradeValue.target15Hit := true
+                tradeValue.state := T_COMPLETED
+                tradeValue.terminalTime := time_close
+                f_set_trade_end(tradeValue, time_close)
+                f_fade_trade(tradeValue)
+                tradeValue.outcomeLabel := label.new(time_close, tradeValue.target2, "✓ +2R", xloc = xloc.bar_time, style = label.style_label_left, color = color.new(targetColor, 12), textcolor = color.black, size = f_label_size(labelSizeInput), force_overlay = true)
+                winnerCount += 1
+                if RESEARCH_BUILD
+                    int scoreBucket = f_score_bucket(tradeValue.score)
+                    array.set(researchBucketWins, scoreBucket, array.get(researchBucketWins, scoreBucket) + 1)
+                targetEvent := true
+                if enableAlerts and alertTargets
+                    f_send_json("target_2r", tradeValue.id, tradeValue.direction, tradeValue.zoneType, tradeValue.score, tradeValue.target2, tradeValue.evidence)
+            else
+                if target15HitNow
+                    tradeValue.target15Hit := true
+                    tradeValue.target1Hit := true
+                else if target1HitNow
+                    tradeValue.target1Hit := true
+                if time_close >= tradeValue.plannedEndTime
+                    tradeValue.state := T_EXPIRED
+                    tradeValue.terminalTime := tradeValue.plannedEndTime
+                    f_set_trade_end(tradeValue, tradeValue.plannedEndTime)
+                    f_fade_trade(tradeValue)
+                    string timeText = tradeValue.target15Hit ? "TIME +1.5R" : tradeValue.target1Hit ? "TIME +1R" : "TIME"
+                    float timeY = tradeValue.target15Hit ? tradeValue.target15 : tradeValue.target1Hit ? tradeValue.target1 : tradeValue.entryPrice
+                    tradeValue.outcomeLabel := label.new(tradeValue.plannedEndTime, timeY, timeText, xloc = xloc.bar_time, style = label.style_label_left, color = color.new(neutralColor, 20), textcolor = color.white, size = f_label_size(labelSizeInput), force_overlay = true)
+
+        if f_trade_terminal(tradeValue.state)
+            int retentionMs = (showPastTrades ? pastTradeRetentionHours * 60 : completedRetentionMinutes) * 60 * 1000
+            if not na(tradeValue.terminalTime) and time > tradeValue.terminalTime + retentionMs
+                f_delete_trade_drawings(tradeValue)
+                array.remove(trades, i)
+
+while array.size(trades) > maximumRetainedTrades
+    Trade oldTrade = array.shift(trades)
+    f_delete_trade_drawings(oldTrade)
+
+if barstate.islast and array.size(zones) > 0
+    int shownZones = 0
+    for i = array.size(zones) - 1 to 0
+        Zone zoneValue = array.get(zones, i)
+        float zoneDistance = close > zoneValue.top ? close - zoneValue.top : close < zoneValue.bottom ? zoneValue.bottom - close : 0.0
+        bool relevantZone = researchZoneFilter == "All active" or zoneValue.score >= researchCandidateMinimum or zoneDistance <= atr * 4.0
+        bool activeVisible = zoneValue.state == Z_ACTIVE
+        bool invalidHistoryVisible = showInvalidatedZoneHistory and zoneValue.state == Z_INVALID and not na(zoneValue.terminalTime) and time_close <= zoneValue.terminalTime + invalidatedZoneRetentionMinutes * 60 * 1000
+        bool shouldShow = RESEARCH_BUILD and showAllResearchZones and relevantZone and (activeVisible or invalidHistoryVisible) and shownZones < maximumResearchZones
+        if shouldShow
+            int rightTime = activeVisible ? zoneValue.expiryTime : zoneValue.terminalTime
+            color zoneColor = zoneValue.direction == DIR_BULL ? bullishZoneColor : bearishZoneColor
+            int boxFillTransparency = activeVisible ? 94 : 97
+            int boxBorderTransparency = activeVisible ? 72 : 84
+            if na(zoneValue.zoneBox)
+                zoneValue.zoneBox := box.new(zoneValue.originTime, zoneValue.top, rightTime, zoneValue.bottom, xloc = xloc.bar_time, bgcolor = color.new(zoneColor, boxFillTransparency), border_color = color.new(zoneColor, boxBorderTransparency), force_overlay = true)
+            else
+                box.set_left(zoneValue.zoneBox, zoneValue.originTime)
+                box.set_right(zoneValue.zoneBox, rightTime)
+                box.set_top(zoneValue.zoneBox, zoneValue.top)
+                box.set_bottom(zoneValue.zoneBox, zoneValue.bottom)
+                box.set_bgcolor(zoneValue.zoneBox, color.new(zoneColor, boxFillTransparency))
+                box.set_border_color(zoneValue.zoneBox, color.new(zoneColor, boxBorderTransparency))
+
+            string terminalSuffix = activeVisible ? "" : " · invalid"
+            string zoneLabelText = f_timeframe_label(zoneValue.sourceTf) + " " + zoneValue.zoneType + terminalSuffix + (showZoneScores ? " · " + str.tostring(zoneValue.score) : "")
+            string zoneTooltip = showDetailedZoneTooltips ? "Score " + str.tostring(zoneValue.score) + " · " + str.tostring(zoneValue.categoryCount) + " categories\n" + zoneValue.scoreBreakdown + (activeVisible ? "" : "\n" + zoneValue.rejectionReason) : "Score " + str.tostring(zoneValue.score)
+            int durationMs = math.max(rightTime - zoneValue.originTime, 60 * 1000)
+            int labelInsetMs = math.min(30 * 1000, math.max(10 * 1000, int(math.round(durationMs * 0.05))))
+            int labelX = zoneLabelPlacement == "Inside right" ? rightTime - int(labelInsetMs * 0.55) : rightTime
+            float labelY = zoneLabelPlacement == "Inside right" ? zoneValue.midpoint : zoneValue.top + math.max(syminfo.mintick * 4.0, (zoneValue.top - zoneValue.bottom) * 0.10)
+            if na(zoneValue.zoneLabel)
+                zoneValue.zoneLabel := label.new(labelX, labelY, zoneLabelText, xloc = xloc.bar_time, style = label.style_none, color = color.new(zoneColor, 100), textcolor = activeVisible ? zoneColor : color.new(zoneColor, 35), size = f_label_size(researchLabelSizeInput), textalign = zoneLabelPlacement == "Inside right" ? text.align_center : text.align_right, tooltip = zoneTooltip, force_overlay = true)
+            else
+                label.set_x(zoneValue.zoneLabel, labelX)
+                label.set_y(zoneValue.zoneLabel, labelY)
+                label.set_text(zoneValue.zoneLabel, zoneLabelText)
+                label.set_textcolor(zoneValue.zoneLabel, activeVisible ? zoneColor : color.new(zoneColor, 35))
+                label.set_tooltip(zoneValue.zoneLabel, zoneTooltip)
+                label.set_size(zoneValue.zoneLabel, f_label_size(researchLabelSizeInput))
+            shownZones += 1
+        else if not na(zoneValue.zoneBox) or not na(zoneValue.zoneLabel)
+            f_delete_zone_drawings(zoneValue)
+
+if barstate.islast and array.size(liquidityPools) > 0
+    int shownPools = 0
+    for i = array.size(liquidityPools) - 1 to 0
+        LiquidityPool poolValue = array.get(liquidityPools, i)
+        bool showPool = RESEARCH_BUILD and showLiquidityPoolLines and poolValue.active and poolValue.touches >= liquidityPoolMinimumTouches and shownPools < 8
+        if showPool
+            int poolRight = time_close + liquidityPoolForwardMinutes * 60 * 1000
+            color poolColor = poolValue.side == POOL_SUPPORT ? bullishZoneColor : bearishZoneColor
+            string poolText = poolValue.side == POOL_SUPPORT ? "SUPPORT ZONE" : "RESISTANCE ZONE"
+            int poolStart = poolValue.firstTime
+            float poolLabelY = poolValue.side == POOL_SUPPORT ? poolValue.price - liquidityLabelOffsetTicks * syminfo.mintick : poolValue.price + liquidityLabelOffsetTicks * syminfo.mintick
+            if na(poolValue.poolLine)
+                poolValue.poolLine := line.new(poolStart, poolValue.price, poolRight, poolValue.price, xloc = xloc.bar_time, color = color.new(poolColor, 32), style = line.style_dashed, width = 1, force_overlay = true)
+            else
+                line.set_x1(poolValue.poolLine, poolStart)
+                line.set_x2(poolValue.poolLine, poolRight)
+                line.set_y1(poolValue.poolLine, poolValue.price)
+                line.set_y2(poolValue.poolLine, poolValue.price)
+            if na(poolValue.poolLabel)
+                poolValue.poolLabel := label.new(poolRight, poolLabelY, poolText, xloc = xloc.bar_time, style = label.style_label_left, color = color.new(poolColor, 74), textcolor = color.white, size = f_label_size(researchLabelSizeInput), force_overlay = true)
+            else
+                label.set_x(poolValue.poolLabel, poolRight)
+                label.set_y(poolValue.poolLabel, poolLabelY)
+                label.set_text(poolValue.poolLabel, poolText)
+                label.set_size(poolValue.poolLabel, f_label_size(researchLabelSizeInput))
+            shownPools += 1
+        else if not na(poolValue.poolLine) or not na(poolValue.poolLabel)
+            f_delete_pool_drawings(poolValue)
+
+if RESEARCH_BUILD and showRejectedCandidates and barstate.isconfirmed and researchCandidateEvent and not na(latestCandidateScore) and latestCandidateScore >= researchCandidateMinimum and latestCandidateReason != "LIVE QUALIFIED"
+    label candidateLabel = label.new(time_close, close, "CANDIDATE • " + str.tostring(latestCandidateScore) + "\n" + latestCandidateReason, xloc = xloc.bar_time, style = label.style_label_left, color = color.new(neutralColor, 72), textcolor = color.white, size = size.small, tooltip = latestCandidateZone + "\n" + latestCandidateBreakdown, force_overlay = true)
+    array.push(researchCandidateLabels, candidateLabel)
+    while array.size(researchCandidateLabels) > 80
+        label.delete(array.shift(researchCandidateLabels))
+
+var table regimePanel = table.new(f_panel_position(panelPosition), 3, 4, bgcolor = color.new(color.rgb(13, 17, 31), 5), frame_color = color.new(accentColor, 28), frame_width = 1, border_color = color.new(neutralColor, 78), border_width = 1)
+if barstate.isfirst
+    table.merge_cells(regimePanel, 0, 0, 2, 0)
+if barstate.islast
+    panelSize = f_label_size(panelTextSizeInput)
+    color invisible = color.new(color.black, 100)
+    if showRegimePanel
+        table.cell(regimePanel, 0, 0, "MERIDIAN — REGIME DETECTION", width = 30, height = 3, bgcolor = color.new(accentColor, 12), text_color = color.white, text_size = panelSize, text_halign = text.align_center)
+
+        table.cell(regimePanel, 0, 1, "4H\n" + f_regime_text(r240) + " · " + f_regime_score_text(r240), width = 10, height = 6, bgcolor = color.new(f_regime_color(r240), 82), text_color = color.white, text_size = panelSize, text_halign = text.align_center, text_valign = text.align_center)
+        table.cell(regimePanel, 1, 1, "1H\n" + f_regime_text(r60) + " · " + f_regime_score_text(r60), width = 10, height = 6, bgcolor = color.new(f_regime_color(r60), 82), text_color = color.white, text_size = panelSize, text_halign = text.align_center, text_valign = text.align_center)
+        table.cell(regimePanel, 2, 1, "30M\n" + f_regime_text(r30) + " · " + f_regime_score_text(r30), width = 10, height = 6, bgcolor = color.new(f_regime_color(r30), 82), text_color = color.white, text_size = panelSize, text_halign = text.align_center, text_valign = text.align_center)
+        table.cell(regimePanel, 0, 2, "15M\n" + f_regime_text(r15) + " · " + f_regime_score_text(r15), width = 10, height = 6, bgcolor = color.new(f_regime_color(r15), 82), text_color = color.white, text_size = panelSize, text_halign = text.align_center, text_valign = text.align_center)
+        table.cell(regimePanel, 1, 2, "5M\n" + f_regime_text(r5) + " · " + f_regime_score_text(r5), width = 10, height = 6, bgcolor = color.new(f_regime_color(r5), 82), text_color = color.white, text_size = panelSize, text_halign = text.align_center, text_valign = text.align_center)
+        table.cell(regimePanel, 2, 2, executionTfLabel + "\n" + f_regime_text(localRegimeScore) + " · " + f_regime_score_text(localRegimeScore), width = 10, height = 6, bgcolor = color.new(f_regime_color(localRegimeScore), 82), text_color = color.white, text_size = panelSize, text_halign = text.align_center, text_valign = text.align_center)
+
+        string engineText = engineSupported ? "READY" : supportedSymbol ? "USE 1M" : "CHECK SYMBOL"
+        table.cell(regimePanel, 0, 3, "ENGINE\n" + engineText, width = 10, height = 4, bgcolor = color.new(engineSupported ? bullishSignalColor : bearishSignalColor, 88), text_color = color.white, text_size = panelSize, text_halign = text.align_center, text_valign = text.align_center)
+        table.cell(regimePanel, 1, 3, "THRESHOLD\n" + str.tostring(minimumScore) + " · " + str.tostring(minimumCategories) + " categories", width = 10, height = 4, bgcolor = color.new(neutralColor, 90), text_color = color.white, text_size = panelSize, text_halign = text.align_center, text_valign = text.align_center)
+        table.cell(regimePanel, 2, 3, "LATEST\n" + (na(latestCandidateScore) ? "—" : str.tostring(latestCandidateScore) + " · " + latestCandidateZone), width = 10, height = 4, bgcolor = color.new(neutralColor, 90), text_color = color.white, text_size = panelSize, text_halign = text.align_center, text_valign = text.align_center)
+    else
+        table.cell(regimePanel, 0, 0, "", bgcolor = invisible, text_color = invisible, width = 1, height = 1)
+        for panelRow = 1 to 3
+            for panelCol = 0 to 2
+                table.cell(regimePanel, panelCol, panelRow, "", bgcolor = invisible, text_color = invisible, width = 1, height = 1)
+
+alertcondition(enableAlerts and alertSignals and buySignalEvent, "Meridian BUY", "Meridian Futures Setups produced a confirmed BUY signal.")
+alertcondition(enableAlerts and alertSignals and sellSignalEvent, "Meridian SELL", "Meridian Futures Setups produced a confirmed SELL signal.")
+alertcondition(enableAlerts and alertTargets and targetEvent, "Meridian target", "A Meridian Futures Setups trade reached 2R.")
+alertcondition(enableAlerts and alertStops and stopEvent, "Meridian stop", "A Meridian Futures Setups trade reached its stop.")
