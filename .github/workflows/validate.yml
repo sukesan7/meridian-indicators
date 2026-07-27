@@ -15,4 +15,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: python tools/validate_repo.py
+      - name: Test repository tooling
+        run: python -m unittest discover -s tools -p "test_*.py"
+      - name: Check repository formatting
+        run: python tools/format_repo.py --check
+      - name: Run static validation
+        run: python tools/validate_repo.py
