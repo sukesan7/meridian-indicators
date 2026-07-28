@@ -124,6 +124,15 @@ The validator checks the manifest, source headers, local documentation links, ba
 
 Bug reports and focused improvements are welcome. Read [CONTRIBUTING.md](./CONTRIBUTING.md) before submitting a change. Calculation changes should include a reproducible chart case, symbol, timeframe, session settings and expected behavior.
 
+## Community and updates
+
+- **Meridian Desk:** Community support, chart discussion, setup feedback, and indicator usage.
+- **X:** Development updates, research notes, and release announcements.
+- **GitHub Issues:** Reproducible bugs and focused feature requests.
+
+For calculation or display problems, include the indicator version, symbol, timeframe, session settings, affected date and time, and a screenshot.
+
 ## License and risk notice
 
 Source code is licensed under the [Mozilla Public License 2.0](./LICENSE). See [DISCLAIMER.md](./DISCLAIMER.md) for the trading and market-data notice.
+Meridian Indicators is an independent open-source project and is not affiliated with or endorsed by TradingView.
