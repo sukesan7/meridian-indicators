@@ -1,6 +1,6 @@
 //@version=6
 // SPDX-License-Identifier: MPL-2.0
-// Meridian - Options Levels v0.2.1 research build
+// Meridian — Options Levels · v0.2.1
 
 indicator(
      title = "Meridian - Options Levels",
