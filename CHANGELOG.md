@@ -2,6 +2,27 @@
 
 All notable repository and public-script changes are recorded here.
 
+## [0.1.1] — 2026-08-08
+
+### Options Levels 0.2.1
+
+- Rebuilt Options Levels around a dynamic reaction-zone engine instead of a reference-first chart layout.
+- Added scored candidate construction from previous-day, previous-week, premarket, Opening Range, RTH open, confirmed swing pivots, gap structure, adaptive round numbers, RTH VWAP, optional VWAP bands, event AVWAP and optional ATR projections.
+- Added explainable candidate scoring using source authority, historical reaction quality, impulse, touch quality, recency and available participation evidence.
+- Added adaptive clustering with ATR-, tick- and percentage-aware tolerances, weighted zone centers, dispersion-based widths and diminishing returns for redundant evidence.
+- Added actionability scoring so nearby high-quality zones are preferred over distant references, plus hysteresis to reduce zone flicker and unnecessary replacements.
+- Changed the default presentation to the strongest active support and resistance reaction zones, with `Zones + Key References` and `Legacy / Debug` modes available for additional detail.
+- Added zone lifecycle states for `DISTANT`, `APPROACHING`, `INSIDE`, `REJECTING`, `ACCEPTING`, `BROKEN` and `FLIPPED`.
+- Added confirmed break and flip handling so wick-only movement does not immediately redefine a zone.
+- Added brighter actionability-gated `BUY` and `SELL` edge areas at the outer edges of qualifying support and resistance zones.
+- Simplified zone labels to show the zone role and current state without exposing internal scores, price ranges or confluence strings on the chart.
+- Enlarged the compact top-right dashboard and kept range, nearest-state and confirmed daily-ATR information visible.
+- Added a transparent Opening Range window box for the configured opening-range period.
+- Made ±1σ and ±2σ VWAP bands independently available in normal display modes instead of limiting them to debug mode.
+- Added research-only Data Window outputs for support/resistance bounds, strength, actionability and nearest-zone state.
+- Replaced legacy level-break alerts with transition-focused alerts for zone entry, rejection, acceptance/break, confirmed flips and materially stronger zone selection.
+- Preserved intraday-only operation, confirmed higher-timeframe values and bounded internal state.
+
 ## [0.1.0] — 2026-07-25
 
 ### Repository

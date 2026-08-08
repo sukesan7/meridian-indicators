@@ -8,7 +8,7 @@
     {
       "id": "options-levels",
       "name": "Meridian — Options Levels",
-      "version": "0.1.7",
+      "version": "0.2.1",
       "market": "options-underlyings",
       "status": "stable",
       "source": "src/options/meridian-options-levels.pine",

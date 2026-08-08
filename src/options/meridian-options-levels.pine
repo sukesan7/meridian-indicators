@@ -1,756 +1,1469 @@
 //@version=6
 // SPDX-License-Identifier: MPL-2.0
-// Meridian — Options Levels · v0.1.7
+// Meridian — Options Levels · v0.2.1
 
 indicator(
-     title = "Meridian — Options Levels",
+     title = "Meridian - Options Levels",
      shorttitle = "Meridian Options Levels",
      overlay = true,
-     max_lines_count = 100,
-     max_labels_count = 100,
-     max_boxes_count = 20
+     max_bars_back = 1000,
+     max_boxes_count = 8,
+     behind_chart = true
 )
 
 string GROUP_SESSIONS = "01. Sessions"
-string GROUP_LEVELS   = "02. Levels"
-string GROUP_OR       = "03. Opening Range"
-string GROUP_VWAP     = "04. VWAP"
-string GROUP_EMA      = "05. Trend Filters"
-string GROUP_STYLE    = "06. Colors & Style"
-string GROUP_LABELS   = "07. Labels"
-string GROUP_ALERTS   = "08. Alerts"
+string GROUP_DISPLAY = "02. Display"
+string GROUP_ENGINE = "03. Reaction Zones"
+string GROUP_SOURCES = "04. Candidate Sources"
+string GROUP_REACTION = "05. Reaction Model"
+string GROUP_EVENT = "06. Event AVWAP"
+string GROUP_VWAP = "07. VWAP"
+string GROUP_ALERTS = "08. Dashboard & Alerts"
 
-string sessionTimezone = input.string(
-     "America/New_York",
-     "Session timezone",
-     group = GROUP_SESSIONS,
-     tooltip = "Use America/New_York for SPY, QQQ, and other US-listed underlyings."
-)
+string sessionTimezone = input.string("America/New_York", "Session timezone", group = GROUP_SESSIONS)
+string rthInput = input.session("0930-1600", "Regular session", group = GROUP_SESSIONS)
+string premarketInput = input.session("0400-0930", "Premarket session", group = GROUP_SESSIONS)
+bool weekdaysOnly = input.bool(true, "Monday-Friday only", group = GROUP_SESSIONS)
+int openingRangeMinutes = input.int(15, "Opening-range minutes", minval = 1, maxval = 120, group = GROUP_SESSIONS)
 
-string rthInput = input.session(
-     "0930-1600",
-     "Regular session",
-     group = GROUP_SESSIONS
+string displayMode = input.string(
+     "Reaction Zones",
+     "Display mode",
+     options = ["Reaction Zones", "Zones + Key References", "Legacy / Debug"],
+     group = GROUP_DISPLAY
 )
+bool showZoneText = input.bool(true, "Show zone text", group = GROUP_DISPLAY)
+bool showDashboard = input.bool(true, "Show compact dashboard", group = GROUP_DISPLAY)
+int zoneBackBars = input.int(12, "Zone history bars", minval = 1, maxval = 250, group = GROUP_DISPLAY)
+int zoneForwardBars = input.int(40, "Zone projection bars", minval = 5, maxval = 250, group = GROUP_DISPLAY)
+bool showEdgeSignals = input.bool(true, "Show buy / sell edge zones", group = GROUP_DISPLAY)
+float edgeSignalMinimumActionability = input.float(55.0, "Edge zone minimum actionability", minval = 0.0, maxval = 100.0, step = 1.0, group = GROUP_DISPLAY)
+float edgeSignalHeightPct = input.float(0.20, "Edge zone height (% of parent zone)", minval = 0.05, maxval = 0.50, step = 0.01, group = GROUP_DISPLAY)
+bool showOpeningRangeBox = input.bool(true, "Highlight opening-range window", group = GROUP_DISPLAY)
+color resistanceColor = input.color(#F87171, "Resistance zone", group = GROUP_DISPLAY)
+color supportColor = input.color(#2DD4BF, "Support zone", group = GROUP_DISPLAY)
+color neutralColor = input.color(#A1A1AA, "Neutral / broken state", group = GROUP_DISPLAY)
 
-string premarketInput = input.session(
-     "0400-0930",
-     "Premarket session",
-     group = GROUP_SESSIONS
-)
+int atrLength = input.int(14, "Confirmed daily ATR length", minval = 5, maxval = 100, group = GROUP_ENGINE)
+float maxDistanceAtr = input.float(2.5, "Maximum candidate distance (daily ATR)", minval = 0.5, maxval = 10.0, step = 0.25, group = GROUP_ENGINE)
+float clusterAtrFraction = input.float(0.08, "Cluster tolerance (daily ATR)", minval = 0.02, maxval = 0.25, step = 0.01, group = GROUP_ENGINE)
+int clusterMinimumTicks = input.int(4, "Minimum cluster tolerance (ticks)", minval = 1, maxval = 100, group = GROUP_ENGINE)
+float clusterMinimumPct = input.float(0.0005, "Minimum cluster tolerance (% as decimal)", minval = 0.0, maxval = 0.01, step = 0.0001, group = GROUP_ENGINE)
+float minZoneAtr = input.float(0.02, "Minimum zone half-width (daily ATR)", minval = 0.005, maxval = 0.10, step = 0.005, group = GROUP_ENGINE)
+float maxZoneAtr = input.float(0.12, "Maximum zone half-width (daily ATR)", minval = 0.03, maxval = 0.40, step = 0.01, group = GROUP_ENGINE)
+int minZoneTicks = input.int(4, "Minimum zone half-width (ticks)", minval = 1, maxval = 100, group = GROUP_ENGINE)
+float dispersionMultiplier = input.float(1.25, "Cluster dispersion multiplier", minval = 0.5, maxval = 3.0, step = 0.05, group = GROUP_ENGINE)
+float actionabilityDecay = input.float(0.45, "Distance decay", minval = 0.05, maxval = 2.0, step = 0.05, group = GROUP_ENGINE)
+float switchMargin = input.float(10.0, "Zone switch margin", minval = 1.0, maxval = 30.0, step = 1.0, group = GROUP_ENGINE)
+float minimumZoneStrength = input.float(45.0, "Minimum zone strength", minval = 0.0, maxval = 100.0, step = 1.0, group = GROUP_ENGINE)
+int refreshBars = input.int(3, "Cluster refresh bars", minval = 1, maxval = 20, group = GROUP_ENGINE)
+float approachingAtr = input.float(0.20, "Approaching distance (daily ATR)", minval = 0.02, maxval = 1.0, step = 0.01, group = GROUP_ENGINE)
+float rejectionDisplacementAtr = input.float(0.03, "Rejection displacement (daily ATR)", minval = 0.0, maxval = 0.25, step = 0.01, group = GROUP_ENGINE)
+float breakDisplacementAtr = input.float(0.04, "Break displacement (daily ATR)", minval = 0.0, maxval = 0.30, step = 0.01, group = GROUP_ENGINE)
+int breakClosesRequired = input.int(2, "Closes beyond zone for break", minval = 1, maxval = 5, group = GROUP_ENGINE)
+int acceptanceClosesRequired = input.int(2, "Closes in / through zone for acceptance", minval = 1, maxval = 5, group = GROUP_ENGINE)
+int stateHoldBars = input.int(3, "Event-state hold bars", minval = 1, maxval = 20, group = GROUP_ENGINE)
+int flipWatchMinutes = input.int(30, "Broken-zone flip watch (minutes)", minval = 5, maxval = 240, group = GROUP_ENGINE)
+float flipRetestAtr = input.float(0.04, "Flip retest tolerance (daily ATR)", minval = 0.0, maxval = 0.25, step = 0.01, group = GROUP_ENGINE)
 
-bool weekdaysOnly = input.bool(
-     true,
-     "Monday-Friday only",
-     group = GROUP_SESSIONS
+bool usePriorDay = input.bool(true, "Previous day / close", group = GROUP_SOURCES)
+bool usePriorWeek = input.bool(true, "Previous week", group = GROUP_SOURCES)
+bool usePremarket = input.bool(true, "Premarket high / low", group = GROUP_SOURCES)
+bool useOpeningRange = input.bool(true, "Finalized opening range", group = GROUP_SOURCES)
+bool useRthOpen = input.bool(true, "RTH open", group = GROUP_SOURCES)
+bool usePivots = input.bool(true, "Confirmed swing pivots", group = GROUP_SOURCES)
+int pivotLeftBars = input.int(3, "Pivot left bars", minval = 1, maxval = 20, group = GROUP_SOURCES)
+int pivotRightBars = input.int(3, "Pivot right bars", minval = 1, maxval = 20, group = GROUP_SOURCES)
+int maxPivotRecords = input.int(36, "Maximum pivot records", minval = 10, maxval = 60, group = GROUP_SOURCES)
+int pivotMaxAgeBars = input.int(600, "Pivot maximum age (bars)", minval = 50, maxval = 3000, group = GROUP_SOURCES)
+int pivotDecayBars = input.int(240, "Pivot recency decay (bars)", minval = 20, maxval = 1500, group = GROUP_SOURCES)
+bool useRoundNumbers = input.bool(true, "Adaptive round numbers", group = GROUP_SOURCES)
+bool useAtrProjections = input.bool(false, "ATR projections", group = GROUP_SOURCES)
+bool useGapStructure = input.bool(true, "Gap structure", group = GROUP_SOURCES)
+float gapMinimumAtr = input.float(0.15, "Minimum gap (daily ATR)", minval = 0.02, maxval = 2.0, step = 0.01, group = GROUP_SOURCES)
+bool useVwapCandidate = input.bool(true, "RTH VWAP as candidate", group = GROUP_SOURCES)
+bool useVwapBandCandidates = input.bool(false, "VWAP bands as candidates", group = GROUP_SOURCES)
+
+int reactionLookback = input.int(120, "Reaction lookback bars", minval = 30, maxval = 400, group = GROUP_REACTION)
+int reactionWindow = input.int(6, "Reaction observation bars", minval = 2, maxval = 20, group = GROUP_REACTION)
+int touchCooldownBars = input.int(8, "Touch cooldown bars", minval = 2, maxval = 50, group = GROUP_REACTION)
+int maxReactionTouches = input.int(6, "Maximum historical touches scored", minval = 1, maxval = 12, group = GROUP_REACTION)
+int touchMinimumTicks = input.int(2, "Touch tolerance (ticks)", minval = 1, maxval = 50, group = GROUP_REACTION)
+float touchAtrFraction = input.float(0.025, "Touch tolerance (daily ATR)", minval = 0.005, maxval = 0.15, step = 0.005, group = GROUP_REACTION)
+
+string eventAnchorMode = input.string(
+     "Automatic earnings",
+     "Event AVWAP anchor",
+     options = ["Automatic earnings", "Manual timestamp", "Disabled"],
+     group = GROUP_EVENT
 )
+int manualEventTime = input.time(0, "Manual event timestamp", group = GROUP_EVENT)
+int eventMaxAgeDays = input.int(20, "Maximum event age (days)", minval = 1, maxval = 90, group = GROUP_EVENT)
+int eventMinBars = input.int(5, "Minimum bars before AVWAP contributes", minval = 1, maxval = 100, group = GROUP_EVENT)
+float eventMaxDistanceAtr = input.float(2.0, "Maximum AVWAP distance (daily ATR)", minval = 0.25, maxval = 10.0, step = 0.25, group = GROUP_EVENT)
+
+bool showVwap = input.bool(true, "Show regular-session VWAP", group = GROUP_VWAP)
+float vwapSource = input.source(hlc3, "VWAP source", group = GROUP_VWAP)
+bool showVwapBand1 = input.bool(false, "Show +/-1 stdev band", group = GROUP_VWAP)
+bool showVwapBand2 = input.bool(false, "Show +/-2 stdev band", group = GROUP_VWAP)
+float vwapBand1Multiplier = input.float(1.0, "Band 1 multiplier", minval = 0.1, step = 0.1, group = GROUP_VWAP)
+float vwapBand2Multiplier = input.float(2.0, "Band 2 multiplier", minval = 0.1, step = 0.1, group = GROUP_VWAP)
+bool showEmas = input.bool(false, "Show 9 / 21 EMA in Legacy / Debug", group = GROUP_VWAP)
+
+bool enableAlerts = input.bool(true, "Enable transition alerts", group = GROUP_ALERTS)
+bool showResearchValues = input.bool(false, "Show research values in Data Window", group = GROUP_ALERTS)
+
+int SRC_PDH = 1
+int SRC_PDL = 2
+int SRC_PDC = 3
+int SRC_PMH = 4
+int SRC_PML = 5
+int SRC_PWH = 6
+int SRC_PWL = 7
+int SRC_ORH = 8
+int SRC_ORL = 9
+int SRC_RTH_OPEN = 10
+int SRC_PIVOT_HIGH = 11
+int SRC_PIVOT_LOW = 12
+int SRC_GAP = 13
+int SRC_ROUND = 14
+int SRC_VWAP = 15
+int SRC_VWAP_BAND = 16
+int SRC_EVENT_AVWAP = 17
+int SRC_ATR_PROJECTION = 18
+
+int STATE_DISTANT = 1
+int STATE_APPROACHING = 2
+int STATE_INSIDE = 3
+int STATE_REJECTING = 4
+int STATE_ACCEPTING = 5
+int STATE_BROKEN = 6
+int STATE_FLIPPED = 7
 
 string sessionDays = weekdaysOnly ? ":23456" : ":1234567"
 string rthSession = rthInput + sessionDays
 string premarketSession = premarketInput + sessionDays
-
 bool inRth = not na(time(timeframe.period, rthSession, sessionTimezone))
 bool inPremarket = not na(time(timeframe.period, premarketSession, sessionTimezone))
-
-int calendarDayKey =
-     year(time, sessionTimezone) * 10000 +
-     month(time, sessionTimezone) * 100 +
-     dayofmonth(time, sessionTimezone)
-
+int calendarDayKey = year(time, sessionTimezone) * 10000 + month(time, sessionTimezone) * 100 + dayofmonth(time, sessionTimezone)
 bool newCalendarDay = na(calendarDayKey[1]) or calendarDayKey != calendarDayKey[1]
-
-bool rthStart =
-     inRth and (
-         session.isfirstbar_regular or
-         newCalendarDay or
-         not inRth[1]
-     )
-
-bool premarketStart =
-     inPremarket and (
-         newCalendarDay or
-         not inPremarket[1]
-     )
+bool rthStart = inRth and (newCalendarDay or not inRth[1])
+bool premarketStart = inPremarket and (newCalendarDay or not inPremarket[1])
 
 if barstate.isfirst and not timeframe.isintraday
     runtime.error("Meridian Options Levels is designed for intraday charts.")
 
-bool showPriorDay = input.bool(true, "Previous-day high / low", group = GROUP_LEVELS)
-bool showPriorClose = input.bool(true, "Previous-day close", group = GROUP_LEVELS)
-bool showSessionOpen = input.bool(true, "Current regular-session open", group = GROUP_LEVELS)
-bool showPremarket = input.bool(true, "Premarket high / low", group = GROUP_LEVELS)
-bool showPriorWeek = input.bool(true, "Previous-week high / low", group = GROUP_LEVELS)
-
-bool showOpeningRange = input.bool(true, "Show opening range", group = GROUP_OR)
-int openingRangeMinutes = input.int(
-     15,
-     "Opening-range minutes",
-     minval = 1,
-     maxval = 120,
-     group = GROUP_OR,
-     tooltip = "15 minutes is the default. Use 5 minutes for faster event-day execution."
+float chartAtr = ta.atr(atrLength)
+float confirmedDailyAtr = request.security(
+     syminfo.tickerid,
+     "1D",
+     ta.atr(atrLength)[1],
+     gaps = barmerge.gaps_off,
+     lookahead = barmerge.lookahead_on
 )
-bool showOpeningRangeBox = input.bool(true, "Shade opening range", group = GROUP_OR)
-int openingRangeTransparency = input.int(
-     87,
-     "Range shading transparency",
-     minval = 0,
-     maxval = 100,
-     group = GROUP_OR
-)
+float normalizationAtr = not na(confirmedDailyAtr) and confirmedDailyAtr > 0.0 ? confirmedDailyAtr : chartAtr
+float volumeBaseline = ta.sma(volume, 20)
+float clusterTolerance = math.max(clusterMinimumTicks * syminfo.mintick, math.max(normalizationAtr * clusterAtrFraction, close * clusterMinimumPct))
+float maximumCandidateDistance = normalizationAtr * maxDistanceAtr
 
-bool showVwap = input.bool(true, "Regular-session VWAP", group = GROUP_VWAP)
-float vwapSource = input.source(hlc3, "VWAP source", group = GROUP_VWAP)
+type PivotRecord
+    float price
+    int polarity
+    int pivotBar
+    int knownBar
+    float baseWeight
+    float originImpulse
+    float originVolume
 
-bool showVwapBand1 = input.bool(false, "Show ±1σ band", group = GROUP_VWAP)
-bool showVwapBand2 = input.bool(false, "Show ±2σ band", group = GROUP_VWAP)
-float vwapBand1Multiplier = input.float(1.0, "Band 1 multiplier", minval = 0.1, step = 0.1, group = GROUP_VWAP)
-float vwapBand2Multiplier = input.float(2.0, "Band 2 multiplier", minval = 0.1, step = 0.1, group = GROUP_VWAP)
-int vwapBandTransparency = input.int(92, "Band fill transparency", minval = 0, maxval = 100, group = GROUP_VWAP)
+type LevelCandidate
+    float price
+    float baseWeight
+    float score
+    float reaction
+    float impulse
+    float touchQuality
+    float recency
+    float volumeEvidence
+    int sourceType
+    string name
+    string family
+    int polarity
 
-bool showEmas = input.bool(false, "Show EMA trend filter", group = GROUP_EMA)
-int fastEmaLength = input.int(9, "Fast EMA", minval = 1, group = GROUP_EMA)
-int slowEmaLength = input.int(21, "Slow EMA", minval = 1, group = GROUP_EMA)
+type Cluster
+    float center
+    float low
+    float high
+    float strength
+    float actionability
+    float weightedMean
+    float maxScore
+    float reactionQuality
+    float weightSum
+    float priceWeightSum
+    float squareWeightSum
+    float scoreWeightSum
+    float reactionWeightSum
+    float reactionWeight
+    float supportWeight
+    float resistanceWeight
+    int memberCount
+    int diversityCount
+    string families
+    string sourceTokens
+    string sources
+    int sourceNameCount
 
-color priorDayColor = input.color(#F4F4F5, "PDH / PDL", group = GROUP_STYLE)
-color priorCloseColor = input.color(#7DD3FC, "Previous close", group = GROUP_STYLE)
-color sessionOpenColor = input.color(#BAE6FD, "Regular-session open", group = GROUP_STYLE)
-color premarketColor = input.color(#67E8F9, "Premarket high / low", group = GROUP_STYLE)
-color priorWeekColor = input.color(#E5E7EB, "Previous-week high / low", group = GROUP_STYLE)
-color openingRangeColor = input.color(#FBBF24, "Opening range", group = GROUP_STYLE)
-color vwapColor = input.color(#C4B5FD, "VWAP", group = GROUP_STYLE)
-color vwapBandColor = input.color(#A78BFA, "VWAP bands", group = GROUP_STYLE)
-color fastEmaColor = input.color(#38BDF8, "Fast EMA", group = GROUP_STYLE)
-color slowEmaColor = input.color(#FDE68A, "Slow EMA", group = GROUP_STYLE)
+type ActiveZone
+    bool valid
+    float center
+    float low
+    float high
+    float strength
+    float actionability
+    float weightedMean
+    float reactionQuality
+    int diversityCount
+    string sources
+    int polarity
+    bool polarityFlipped
+    int state
+    int stateBar
+    int selectedBar
+    int insideCloses
+    int beyondCloses
+    int missedRefreshes
 
-int majorLineWidth = input.int(2, "Major level width", minval = 1, maxval = 4, group = GROUP_STYLE)
-int minorLineWidth = input.int(1, "Minor level width", minval = 1, maxval = 4, group = GROUP_STYLE)
+type FlipWatch
+    bool valid
+    float center
+    float low
+    float high
+    float strength
+    float weightedMean
+    float reactionQuality
+    int diversityCount
+    string sources
+    int brokenTime
 
-string priorDayStyleInput = input.string("Solid", "PDH / PDL style", options = ["Solid", "Dashed", "Dotted"], group = GROUP_STYLE)
-string priorCloseStyleInput = input.string("Dashed", "Previous close style", options = ["Solid", "Dashed", "Dotted"], group = GROUP_STYLE)
-string premarketStyleInput = input.string("Dashed", "Premarket style", options = ["Solid", "Dashed", "Dotted"], group = GROUP_STYLE)
-string priorWeekStyleInput = input.string("Dotted", "Weekly style", options = ["Solid", "Dashed", "Dotted"], group = GROUP_STYLE)
-string openingRangeStyleInput = input.string("Solid", "Opening-range style", options = ["Solid", "Dashed", "Dotted"], group = GROUP_STYLE)
+f_clamp(float x, float lo, float hi) =>
+    math.max(lo, math.min(hi, x))
 
-bool showLabels = input.bool(true, "Show level labels", group = GROUP_LABELS)
-bool showPricesInLabels = input.bool(true, "Include price in labels", group = GROUP_LABELS)
-string labelSizeInput = input.string(
-     "Tiny",
-     "Label size",
-     options = ["Tiny", "Small", "Normal"],
-     group = GROUP_LABELS
-)
-bool showLabelBackground = input.bool(
-     false,
-     "Show compact label background",
-     group = GROUP_LABELS
-)
-int labelOffsetBars = input.int(
-     3,
-     "Label distance from latest bar",
-     minval = 0,
-     maxval = 50,
-     group = GROUP_LABELS
-)
-bool staggerLabels = input.bool(
-     true,
-     "Stagger nearby labels to the right",
-     group = GROUP_LABELS,
-     tooltip = "Places level families in separate right-side columns so nearby prices do not cover one another."
-)
-int labelStaggerBars = input.int(
-     1,
-     "Horizontal spacing between label columns",
-     minval = 0,
-     maxval = 10,
-     group = GROUP_LABELS
-)
-int labelVerticalOffsetTicks = input.int(
-     2,
-     "Label height above line (ticks)",
-     minval = 0,
-     maxval = 100,
-     group = GROUP_LABELS,
-     tooltip = "Moves only the text above the level. The horizontal line remains at the exact level price."
-)
-int labelTransparency = input.int(78, "Label background transparency", minval = 0, maxval = 100, group = GROUP_LABELS)
+f_positiveSat(float x) =>
+    x <= 0.0 ? 0.0 : 100.0 * x / (x + 0.5)
 
-bool enableAlerts = input.bool(true, "Enable alert conditions", group = GROUP_ALERTS)
-bool enableVwapRejectionAlerts = input.bool(false, "Enable VWAP rejection alerts", group = GROUP_ALERTS)
+f_participationScore(float rvol) =>
+    na(rvol) ? na : f_clamp((rvol - 1.0) * 50.0, 0.0, 100.0)
 
-f_lineStyle(string styleText) =>
-    styleText == "Dashed" ? line.style_dashed :
-     styleText == "Dotted" ? line.style_dotted :
-     line.style_solid
+f_stateText(int state) =>
+    switch state
+        STATE_APPROACHING => "APPROACHING"
+        STATE_INSIDE => "INSIDE"
+        STATE_REJECTING => "REJECTING"
+        STATE_ACCEPTING => "ACCEPTING"
+        STATE_BROKEN => "BROKEN"
+        STATE_FLIPPED => "FLIPPED"
+        => "DISTANT"
 
-f_levelText(string levelName, float levelPrice) =>
-    showPricesInLabels ? levelName + "  " + str.tostring(levelPrice, format.mintick) : levelName
+f_sourceName(int sourceType) =>
+    switch sourceType
+        SRC_PDH => "PDH"
+        SRC_PDL => "PDL"
+        SRC_PDC => "PDC"
+        SRC_PMH => "PMH"
+        SRC_PML => "PML"
+        SRC_PWH => "PWH"
+        SRC_PWL => "PWL"
+        SRC_ORH => "ORH"
+        SRC_ORL => "ORL"
+        SRC_RTH_OPEN => "RTH OPEN"
+        SRC_PIVOT_HIGH => "PIV H"
+        SRC_PIVOT_LOW => "PIV L"
+        SRC_GAP => "GAP"
+        SRC_ROUND => "ROUND"
+        SRC_VWAP => "VWAP"
+        SRC_VWAP_BAND => "VWAP BAND"
+        SRC_EVENT_AVWAP => "EVENT AVWAP"
+        SRC_ATR_PROJECTION => "ATR PROJ"
+        => "LEVEL"
 
-f_labelSize(string sizeText) =>
-    sizeText == "Normal" ? size.normal :
-     sizeText == "Small" ? size.small :
-     size.tiny
+f_sourceFamily(int sourceType) =>
+    switch sourceType
+        SRC_PDH => "DAY"
+        SRC_PDL => "DAY"
+        SRC_PDC => "DAY"
+        SRC_PMH => "PREMARKET"
+        SRC_PML => "PREMARKET"
+        SRC_PWH => "WEEK"
+        SRC_PWL => "WEEK"
+        SRC_ORH => "OR"
+        SRC_ORL => "OR"
+        SRC_RTH_OPEN => "SESSION"
+        SRC_PIVOT_HIGH => "PIVOT"
+        SRC_PIVOT_LOW => "PIVOT"
+        SRC_GAP => "GAP"
+        SRC_ROUND => "ROUND"
+        SRC_VWAP => "VWAP"
+        SRC_VWAP_BAND => "VWAP"
+        SRC_EVENT_AVWAP => "EVENT"
+        SRC_ATR_PROJECTION => "PROJECTION"
+        => "OTHER"
 
-f_labelStyle() =>
-    showLabelBackground ? label.style_label_left : label.style_none
+f_sourceBaseRecency(int sourceType) =>
+    switch sourceType
+        SRC_PWH => 78.0
+        SRC_PWL => 78.0
+        SRC_PDH => 88.0
+        SRC_PDL => 88.0
+        SRC_PDC => 88.0
+        SRC_EVENT_AVWAP => 100.0
+        SRC_PIVOT_HIGH => 100.0
+        SRC_PIVOT_LOW => 100.0
+        => 100.0
 
-f_labelY(float levelPrice) =>
-    levelPrice + syminfo.mintick * labelVerticalOffsetTicks
+f_reactionMetrics(float level, int knownBar) =>
+    float reactionSum = 0.0
+    float impulseSum = 0.0
+    float volumeSum = 0.0
+    int volumeSamples = 0
+    int touches = 0
+    int lastAcceptedOffset = na
+    int mostRecentTouchAge = na
+    int historyLimit = not na(knownBar) ? math.min(reactionLookback, math.max(bar_index - knownBar - 1, 0)) : reactionLookback
+    for i = reactionWindow to reactionLookback
+        if touches < maxReactionTouches and i <= historyLimit
+            float localAtr = normalizationAtr[i]
+            float fallbackAtr = normalizationAtr
+            float tolerance = math.max(touchMinimumTicks * syminfo.mintick, nz(localAtr, fallbackAtr) * touchAtrFraction)
+            bool touched = not na(low[i]) and not na(high[i]) and low[i] <= level + tolerance and high[i] >= level - tolerance
+            bool cooled = na(lastAcceptedOffset) or i - lastAcceptedOffset >= touchCooldownBars
+            if touched and cooled
+                int direction = not na(close[i + 1]) and close[i + 1] > level + tolerance * 0.25 ? 1 : not na(close[i + 1]) and close[i + 1] < level - tolerance * 0.25 ? -1 : close[i] >= level ? 1 : -1
+                float mfe = 0.0
+                float mae = 0.0
+                int persistenceCount = 0
+                for j = 1 to reactionWindow
+                    int offset = i - j
+                    if direction == 1
+                        mfe := math.max(mfe, high[offset] - level)
+                        mae := math.max(mae, level - low[offset])
+                        persistenceCount += close[offset] >= level ? 1 : 0
+                    else
+                        mfe := math.max(mfe, level - low[offset])
+                        mae := math.max(mae, high[offset] - level)
+                        persistenceCount += close[offset] <= level ? 1 : 0
+                float ratio = mfe / math.max(mfe + mae, syminfo.mintick)
+                float persistence = 100.0 * persistenceCount / reactionWindow
+                float reaction = 75.0 * ratio + 0.25 * persistence
+                float impulse = not na(localAtr) and localAtr > 0.0 ? f_positiveSat(mfe / localAtr) : na
+                reactionSum += reaction
+                impulseSum += nz(impulse, 0.0)
+                float baseline = volumeBaseline[i]
+                float rvol = not na(volume[i]) and not na(baseline) and baseline > 0.0 ? volume[i] / baseline : na
+                float volumeScore = f_participationScore(rvol)
+                if not na(volumeScore)
+                    volumeSum += volumeScore
+                    volumeSamples += 1
+                touches += 1
+                lastAcceptedOffset := i
+                mostRecentTouchAge := na(mostRecentTouchAge) ? i : math.min(mostRecentTouchAge, i)
+    float reactionQuality = touches > 0 ? reactionSum / touches : na
+    float impulseQuality = touches > 0 ? impulseSum / touches : na
+    float countScore = touches > 0 ? 100.0 * touches / (touches + 2.0) : na
+    float touchQuality = touches > 0 ? countScore * (0.50 + 0.50 * nz(reactionQuality, 50.0) / 100.0) : na
+    float volumeEvidence = volumeSamples > 0 ? volumeSum / volumeSamples : na
+    [reactionQuality, impulseQuality, touchQuality, volumeEvidence, touches, mostRecentTouchAge]
 
-f_newLine(int startTime, float levelPrice, color levelColor, int width, string styleText) =>
-    line.new(
-         x1 = startTime,
-         y1 = levelPrice,
-         x2 = time_close,
-         y2 = levelPrice,
-         xloc = xloc.bar_time,
-         extend = extend.right,
-         color = levelColor,
-         style = f_lineStyle(styleText),
-         width = width
+f_candidateScore(float sourceQuality, float reactionQuality, float impulseQuality, float touchQuality, float recency, float volumeEvidence) =>
+    float weighted = 0.30 * sourceQuality + 0.10 * recency
+    float weights = 0.40
+    if not na(reactionQuality)
+        weighted += 0.25 * reactionQuality
+        weights += 0.25
+    if not na(impulseQuality)
+        weighted += 0.18 * impulseQuality
+        weights += 0.18
+    if not na(touchQuality)
+        weighted += 0.12 * touchQuality
+        weights += 0.12
+    if not na(volumeEvidence)
+        weighted += 0.05 * volumeEvidence
+        weights += 0.05
+    f_clamp(weighted / math.max(weights, 0.001), 0.0, 100.0)
+
+f_addCandidate(array<LevelCandidate> registry, float level, float baseWeight, int sourceType, int polarity, int originBar, int knownBar, float originImpulse, float originVolume, float recencyOverride, bool scanReactions, float atr, float maxDistance) =>
+    if not na(level) and level > 0.0 and not na(atr) and atr > 0.0 and math.abs(level - close) <= maxDistance
+        bool duplicate = false
+        if registry.size() > 0
+            for existing in registry
+                if existing.sourceType == sourceType and math.abs(existing.price - level) <= syminfo.mintick * 0.5
+                    duplicate := true
+        if not duplicate
+            float reactionQuality = na
+            float reactionImpulse = na
+            float touchQuality = na
+            float reactionVolume = na
+            int mostRecentTouchAge = na
+            if scanReactions
+                [reactionQuality, reactionImpulse, touchQuality, reactionVolume, _, mostRecentTouchAge] = f_reactionMetrics(level, knownBar)
+            float impulseQuality = na(originImpulse) ? reactionImpulse : na(reactionImpulse) ? originImpulse : math.max(originImpulse, reactionImpulse)
+            float volumeEvidence = na(originVolume) ? reactionVolume : na(reactionVolume) ? originVolume : math.max(originVolume, reactionVolume)
+            float baseRecency = f_sourceBaseRecency(sourceType)
+            float originRecency = not na(originBar) ? 100.0 / (1.0 + math.max(bar_index - originBar, 0) / math.max(float(pivotDecayBars), 1.0)) : baseRecency
+            float touchRecency = not na(mostRecentTouchAge) ? 100.0 / (1.0 + mostRecentTouchAge / math.max(float(pivotDecayBars), 1.0)) : na
+            float recency = not na(recencyOverride) ? recencyOverride : sourceType == SRC_PIVOT_HIGH or sourceType == SRC_PIVOT_LOW ? math.max(originRecency, nz(touchRecency, 0.0)) : math.max(baseRecency, nz(touchRecency, 0.0))
+            float finalScore = f_candidateScore(baseWeight, reactionQuality, impulseQuality, touchQuality, recency, volumeEvidence)
+            registry.push(LevelCandidate.new(
+                 price = level,
+                 baseWeight = baseWeight,
+                 score = finalScore,
+                 reaction = reactionQuality,
+                 impulse = impulseQuality,
+                 touchQuality = touchQuality,
+                 recency = recency,
+                 volumeEvidence = volumeEvidence,
+                 sourceType = sourceType,
+                 name = f_sourceName(sourceType),
+                 family = f_sourceFamily(sourceType),
+                 polarity = polarity
+            ))
+
+f_newCluster(LevelCandidate candidate) =>
+    float weight = math.max(candidate.score, 1.0)
+    string familyToken = "|" + candidate.family + "|"
+    string sourceToken = "|" + candidate.name + "|"
+    Cluster.new(
+         center = candidate.price,
+         low = candidate.price,
+         high = candidate.price,
+         strength = candidate.score,
+         actionability = candidate.score,
+         weightedMean = candidate.score,
+         maxScore = candidate.score,
+         reactionQuality = candidate.reaction,
+         weightSum = weight,
+         priceWeightSum = candidate.price * weight,
+         squareWeightSum = candidate.price * candidate.price * weight,
+         scoreWeightSum = candidate.score * weight,
+         reactionWeightSum = na(candidate.reaction) ? 0.0 : candidate.reaction * weight,
+         reactionWeight = na(candidate.reaction) ? 0.0 : weight,
+         supportWeight = candidate.polarity == 1 ? weight : 0.0,
+         resistanceWeight = candidate.polarity == -1 ? weight : 0.0,
+         memberCount = 1,
+         diversityCount = 1,
+         families = familyToken,
+         sourceTokens = sourceToken,
+         sources = candidate.name,
+         sourceNameCount = 1
     )
 
-f_newLabel(float levelPrice, string levelName, color levelColor) =>
-    label.new(
-         x = bar_index,
-         y = f_labelY(levelPrice),
-         text = f_levelText(levelName, levelPrice),
-         xloc = xloc.bar_index,
-         yloc = yloc.price,
-         style = f_labelStyle(),
-         color = showLabelBackground ? color.new(color.black, labelTransparency) : na,
-         textcolor = levelColor,
-         size = f_labelSize(labelSizeInput)
+f_clusterAdd(Cluster cluster, LevelCandidate candidate, float duplicateTolerance) =>
+    bool sameFamily = str.contains(cluster.families, "|" + candidate.family + "|")
+    bool nearDuplicate = math.abs(candidate.price - cluster.center) <= duplicateTolerance
+    float redundancyPenalty = sameFamily ? (nearDuplicate ? 0.55 : 0.78) : 1.0
+    float weight = math.max(candidate.score * redundancyPenalty, 1.0)
+    cluster.weightSum += weight
+    cluster.priceWeightSum += candidate.price * weight
+    cluster.squareWeightSum += candidate.price * candidate.price * weight
+    cluster.scoreWeightSum += candidate.score * weight
+    cluster.maxScore := math.max(cluster.maxScore, candidate.score)
+    if not na(candidate.reaction)
+        cluster.reactionWeightSum += candidate.reaction * weight
+        cluster.reactionWeight += weight
+    if candidate.polarity == 1
+        cluster.supportWeight += weight
+    else if candidate.polarity == -1
+        cluster.resistanceWeight += weight
+    cluster.memberCount += 1
+    if not sameFamily
+        cluster.diversityCount += 1
+        cluster.families += candidate.family + "|"
+    string sourceToken = "|" + candidate.name + "|"
+    if not str.contains(cluster.sourceTokens, sourceToken)
+        cluster.sourceTokens += candidate.name + "|"
+        if cluster.sourceNameCount < 3
+            cluster.sources += " + " + candidate.name
+            cluster.sourceNameCount += 1
+    cluster.center := cluster.priceWeightSum / cluster.weightSum
+    cluster
+
+f_finalizeCluster(Cluster cluster, float atr) =>
+    cluster.center := cluster.priceWeightSum / math.max(cluster.weightSum, 0.001)
+    float variance = math.max(cluster.squareWeightSum / math.max(cluster.weightSum, 0.001) - cluster.center * cluster.center, 0.0)
+    float weightedStd = math.sqrt(variance)
+    float minimumWidth = math.max(minZoneTicks * syminfo.mintick, atr * minZoneAtr)
+    float maximumWidth = math.max(minimumWidth, atr * maxZoneAtr)
+    float halfWidth = f_clamp(math.max(weightedStd * dispersionMultiplier, minimumWidth), minimumWidth, maximumWidth)
+    cluster.low := cluster.center - halfWidth
+    cluster.high := cluster.center + halfWidth
+    cluster.weightedMean := cluster.scoreWeightSum / math.max(cluster.weightSum, 0.001)
+    cluster.reactionQuality := cluster.reactionWeight > 0.0 ? cluster.reactionWeightSum / cluster.reactionWeight : na
+    float redundantMembers = math.max(cluster.memberCount - cluster.diversityCount, 0)
+    float diversityScore = f_clamp(25.0 + math.max(cluster.diversityCount - 1, 0) * 20.0 + math.min(redundantMembers, 3) * 5.0, 0.0, 100.0)
+    float raw = 0.45 * cluster.weightedMean + 0.25 * cluster.maxScore + 0.20 * diversityScore
+    float weights = 0.90
+    if not na(cluster.reactionQuality)
+        raw += 0.10 * cluster.reactionQuality
+        weights += 0.10
+    cluster.strength := f_clamp(raw / weights, 0.0, 100.0)
+    float distanceToZone = close < cluster.low ? cluster.low - close : close > cluster.high ? close - cluster.high : 0.0
+    float distanceAtr = distanceToZone / math.max(atr, syminfo.mintick)
+    cluster.actionability := cluster.strength / (1.0 + distanceAtr * actionabilityDecay)
+    cluster
+
+f_buildClusters(array<LevelCandidate> registry, float tolerance, float atr) =>
+    array<Cluster> result = array.new<Cluster>()
+    if registry.size() > 0
+        registry.sort(order = order.ascending, sort_field = "price")
+        float duplicateTolerance = math.max(syminfo.mintick * 2.0, tolerance * 0.20)
+        Cluster current = na
+        bool hasCurrent = false
+        for candidate in registry
+            if not hasCurrent
+                current := f_newCluster(candidate)
+                hasCurrent := true
+            else if math.abs(candidate.price - current.center) <= tolerance
+                current := f_clusterAdd(current, candidate, duplicateTolerance)
+            else
+                result.push(f_finalizeCluster(current, atr))
+                current := f_newCluster(candidate)
+        if hasCurrent
+            result.push(f_finalizeCluster(current, atr))
+    result
+
+f_clusterPolarityMatch(Cluster cluster, int polarity) =>
+    bool hasSupportAuthority = cluster.supportWeight > 0.0
+    bool hasResistanceAuthority = cluster.resistanceWeight > 0.0
+    polarity == 1 ? (not hasResistanceAuthority or (hasSupportAuthority and cluster.supportWeight >= cluster.resistanceWeight)) : (not hasSupportAuthority or (hasResistanceAuthority and cluster.resistanceWeight >= cluster.supportWeight))
+
+f_bestClusterIndex(array<Cluster> clusters, int polarity, FlipWatch blockedWatch, float tolerance) =>
+    int bestIndex = -1
+    float bestActionability = -1.0
+    if clusters.size() > 0
+        for [i, cluster] in clusters
+            bool sideMatch = polarity == 1 ? cluster.center < close : cluster.center > close
+            bool polarityMatch = f_clusterPolarityMatch(cluster, polarity)
+            bool blocked = blockedWatch.valid and (cluster.high >= blockedWatch.low and cluster.low <= blockedWatch.high or math.abs(cluster.center - blockedWatch.center) <= tolerance * 1.5)
+            if sideMatch and polarityMatch and not blocked and cluster.strength >= minimumZoneStrength and cluster.actionability > bestActionability
+                bestActionability := cluster.actionability
+                bestIndex := i
+    bestIndex
+
+f_matchingClusterIndex(array<Cluster> clusters, ActiveZone zone, float tolerance) =>
+    int matchIndex = -1
+    float nearest = 1e12
+    if zone.valid and clusters.size() > 0
+        for [i, cluster] in clusters
+            float distance = math.abs(cluster.center - zone.center)
+            bool overlap = cluster.high >= zone.low and cluster.low <= zone.high
+            bool polarityMatch = zone.polarityFlipped or f_clusterPolarityMatch(cluster, zone.polarity)
+            if cluster.strength >= minimumZoneStrength and polarityMatch and (overlap or distance <= tolerance * 1.5) and distance < nearest
+                nearest := distance
+                matchIndex := i
+    matchIndex
+
+f_zoneFromCluster(Cluster cluster, int polarity, int state, int selectedBar) =>
+    ActiveZone.new(
+         valid = true,
+         center = cluster.center,
+         low = cluster.low,
+         high = cluster.high,
+         strength = cluster.strength,
+         actionability = cluster.actionability,
+         weightedMean = cluster.weightedMean,
+         reactionQuality = cluster.reactionQuality,
+         diversityCount = cluster.diversityCount,
+         sources = cluster.sources,
+         polarity = polarity,
+         polarityFlipped = false,
+         state = state,
+         stateBar = bar_index,
+         selectedBar = selectedBar,
+         insideCloses = 0,
+         beyondCloses = 0,
+         missedRefreshes = 0
     )
 
-f_labelX(int columnSlot) =>
-    int extraBars = staggerLabels ? columnSlot * labelStaggerBars : 0
-    bar_index + labelOffsetBars + extraBars
+f_refreshZone(ActiveZone zone, Cluster cluster) =>
+    ActiveZone.new(
+         valid = zone.valid,
+         center = cluster.center,
+         low = cluster.low,
+         high = cluster.high,
+         strength = cluster.strength,
+         actionability = cluster.actionability,
+         weightedMean = cluster.weightedMean,
+         reactionQuality = cluster.reactionQuality,
+         diversityCount = cluster.diversityCount,
+         sources = cluster.sources,
+         polarity = zone.polarity,
+         polarityFlipped = zone.polarityFlipped,
+         state = zone.state,
+         stateBar = zone.stateBar,
+         selectedBar = zone.selectedBar,
+         insideCloses = zone.insideCloses,
+         beyondCloses = zone.beyondCloses,
+         missedRefreshes = 0
+    )
 
-f_updateLabel(label labelId, int labelX, float levelPrice, string levelName, color levelColor) =>
-    if not na(labelId) and not na(levelPrice)
-        label.set_x(labelId, labelX)
-        label.set_y(labelId, f_labelY(levelPrice))
-        label.set_text(labelId, f_levelText(levelName, levelPrice))
-        label.set_style(labelId, f_labelStyle())
-        label.set_color(labelId, showLabelBackground ? color.new(color.black, labelTransparency) : na)
-        label.set_textcolor(labelId, levelColor)
-        label.set_size(labelId, f_labelSize(labelSizeInput))
+f_emptyZone() =>
+    ActiveZone.new(
+         valid = false,
+         center = na,
+         low = na,
+         high = na,
+         strength = na,
+         actionability = na,
+         weightedMean = na,
+         reactionQuality = na,
+         diversityCount = 0,
+         sources = "",
+         polarity = 0,
+         polarityFlipped = false,
+         state = STATE_DISTANT,
+         stateBar = na,
+         selectedBar = na,
+         insideCloses = 0,
+         beyondCloses = 0,
+         missedRefreshes = 0
+    )
 
-var line pdhLine = na
-var line pdlLine = na
-var line pdcLine = na
-var line sessionOpenLine = na
-var line pmhLine = na
-var line pmlLine = na
-var line pwhLine = na
-var line pwlLine = na
-var line orhLine = na
-var line orlLine = na
+f_emptyFlipWatch() =>
+    FlipWatch.new(
+         valid = false,
+         center = na,
+         low = na,
+         high = na,
+         strength = na,
+         weightedMean = na,
+         reactionQuality = na,
+         diversityCount = 0,
+         sources = "",
+         brokenTime = na
+    )
 
-var label pdhLabel = na
-var label pdlLabel = na
-var label pdcLabel = na
-var label sessionOpenLabel = na
-var label pmhLabel = na
-var label pmlLabel = na
-var label pwhLabel = na
-var label pwlLabel = na
-var label orhLabel = na
-var label orlLabel = na
+f_zoneToFlipWatch(ActiveZone zone) =>
+    FlipWatch.new(
+         valid = zone.valid,
+         center = zone.center,
+         low = zone.low,
+         high = zone.high,
+         strength = zone.strength,
+         weightedMean = zone.weightedMean,
+         reactionQuality = zone.reactionQuality,
+         diversityCount = zone.diversityCount,
+         sources = zone.sources,
+         brokenTime = time
+    )
 
-var box openingRangeBox = na
+f_zoneFromFlipWatch(FlipWatch watch, int polarity) =>
+    ActiveZone.new(
+         valid = true,
+         center = watch.center,
+         low = watch.low,
+         high = watch.high,
+         strength = watch.strength,
+         actionability = watch.strength,
+         weightedMean = watch.weightedMean,
+         reactionQuality = watch.reactionQuality,
+         diversityCount = watch.diversityCount,
+         sources = watch.sources,
+         polarity = polarity,
+         polarityFlipped = true,
+         state = STATE_FLIPPED,
+         stateBar = bar_index,
+         selectedBar = bar_index,
+         insideCloses = 0,
+         beyondCloses = 0,
+         missedRefreshes = 0
+    )
+
+f_roundSteps(float price) =>
+    float minor = price < 5.0 ? 0.10 : price < 20.0 ? 0.25 : price < 100.0 ? 0.50 : price < 500.0 ? 1.0 : 5.0
+    float major = price < 5.0 ? 0.25 : price < 20.0 ? 0.50 : price < 100.0 ? 1.0 : price < 500.0 ? 5.0 : 10.0
+    [minor, major]
+
+f_addRoundCandidates(array<LevelCandidate> registry, float atr) =>
+    [minorStep, majorStep] = f_roundSteps(close)
+    float minorBelow = math.floor(close / minorStep) * minorStep
+    float minorAbove = minorBelow + minorStep
+    float majorBelow = math.floor(close / majorStep) * majorStep
+    float majorAbove = majorBelow + majorStep
+    float maxDistance = atr * maxDistanceAtr
+    f_addCandidate(registry, minorBelow, 25.0, SRC_ROUND, 0, na, na, na, na, 100.0, true, atr, maxDistance)
+    f_addCandidate(registry, minorAbove, 25.0, SRC_ROUND, 0, na, na, na, na, 100.0, true, atr, maxDistance)
+    f_addCandidate(registry, majorBelow, 25.0, SRC_ROUND, 0, na, na, na, na, 100.0, true, atr, maxDistance)
+    f_addCandidate(registry, majorAbove, 25.0, SRC_ROUND, 0, na, na, na, na, 100.0, true, atr, maxDistance)
+
+f_zoneFillColor(int polarity, int state) =>
+    color base = polarity == 1 ? supportColor : resistanceColor
+    int transparency = state == STATE_INSIDE ? 80 : state == STATE_REJECTING or state == STATE_FLIPPED ? 82 : state == STATE_ACCEPTING ? 84 : state == STATE_APPROACHING ? 88 : state == STATE_BROKEN ? 93 : 92
+    color.new(state == STATE_BROKEN ? neutralColor : base, transparency)
+
+f_zoneBorderColor(int polarity, int state) =>
+    color base = polarity == 1 ? supportColor : resistanceColor
+    int transparency = state == STATE_INSIDE or state == STATE_REJECTING or state == STATE_FLIPPED ? 5 : state == STATE_ACCEPTING ? 15 : state == STATE_APPROACHING ? 35 : state == STATE_BROKEN ? 50 : 65
+    color.new(state == STATE_BROKEN ? neutralColor : base, transparency)
+
+f_zoneText(ActiveZone zone) =>
+    string side = zone.polarity == 1 ? "SUPPORT" : "RESISTANCE"
+    side + " | " + f_stateText(zone.state)
+
+f_zoneDistanceAtr(ActiveZone zone, float atr) =>
+    float distance = not zone.valid ? na : close < zone.low ? zone.low - close : close > zone.high ? close - zone.high : 0.0
+    not na(distance) ? distance / math.max(atr, syminfo.mintick) : na
 
 var float currentDayHigh = na
 var float currentDayLow = na
 var float currentDayClose = na
-
-var int currentDayHighTime = na
-var int currentDayLowTime = na
-var int currentDayCloseTime = na
-
 var float previousDayHigh = na
 var float previousDayLow = na
 var float previousDayClose = na
-
-var int previousDayHighTime = na
-var int previousDayLowTime = na
-var int previousDayCloseTime = na
-
+var int previousDayKnownBar = na
 var float currentSessionOpen = na
+var int currentSessionOpenKnownBar = na
 
 bool dailyLevelRoll = premarketStart or (rthStart and not inPremarket[1])
-
 if dailyLevelRoll
     if not na(currentDayHigh)
         previousDayHigh := currentDayHigh
         previousDayLow := currentDayLow
         previousDayClose := currentDayClose
-
-        previousDayHighTime := currentDayHighTime
-        previousDayLowTime := currentDayLowTime
-        previousDayCloseTime := currentDayCloseTime
-
-    if not na(pdhLine)
-        line.delete(pdhLine)
-    if not na(pdlLine)
-        line.delete(pdlLine)
-    if not na(pdcLine)
-        line.delete(pdcLine)
-
-    if not na(pdhLabel)
-        label.delete(pdhLabel)
-    if not na(pdlLabel)
-        label.delete(pdlLabel)
-    if not na(pdcLabel)
-        label.delete(pdcLabel)
-
-    pdhLine := na
-    pdlLine := na
-    pdcLine := na
-
-    pdhLabel := na
-    pdlLabel := na
-    pdcLabel := na
-
-    if not na(sessionOpenLine)
-        line.delete(sessionOpenLine)
-    if not na(sessionOpenLabel)
-        label.delete(sessionOpenLabel)
-
-    sessionOpenLine := na
-    sessionOpenLabel := na
-    currentSessionOpen := na
-
-    if showPriorDay and not na(previousDayHigh)
-        pdhLine := f_newLine(previousDayHighTime, previousDayHigh, priorDayColor, majorLineWidth, priorDayStyleInput)
-        pdlLine := f_newLine(previousDayLowTime, previousDayLow, priorDayColor, majorLineWidth, priorDayStyleInput)
-
-        if showLabels
-            pdhLabel := f_newLabel(previousDayHigh, "PDH", priorDayColor)
-            pdlLabel := f_newLabel(previousDayLow, "PDL", priorDayColor)
-
-    if showPriorClose and not na(previousDayClose)
-        pdcLine := f_newLine(previousDayCloseTime, previousDayClose, priorCloseColor, minorLineWidth, priorCloseStyleInput)
-
-        if showLabels
-            pdcLabel := f_newLabel(previousDayClose, "PDC", priorCloseColor)
-
+        previousDayKnownBar := bar_index
     currentDayHigh := na
     currentDayLow := na
     currentDayClose := na
-    currentDayHighTime := na
-    currentDayLowTime := na
-    currentDayCloseTime := na
+    currentSessionOpen := na
+    currentSessionOpenKnownBar := na
 
 if rthStart
-    if not na(sessionOpenLine)
-        line.delete(sessionOpenLine)
-    if not na(sessionOpenLabel)
-        label.delete(sessionOpenLabel)
-
-    sessionOpenLine := na
-    sessionOpenLabel := na
     currentSessionOpen := open
-
-    if showSessionOpen
-        sessionOpenLine := f_newLine(time, currentSessionOpen, sessionOpenColor, minorLineWidth, "Solid")
-
-        if showLabels
-            sessionOpenLabel := f_newLabel(currentSessionOpen, "RTH OPEN", sessionOpenColor)
-
+    currentSessionOpenKnownBar := bar_index
     currentDayHigh := high
     currentDayLow := low
     currentDayClose := close
-
-    currentDayHighTime := time
-    currentDayLowTime := time
-    currentDayCloseTime := time
-
 else if inRth
-    if na(currentDayHigh) or high > currentDayHigh
-        currentDayHigh := high
-        currentDayHighTime := time
-
-    if na(currentDayLow) or low < currentDayLow
-        currentDayLow := low
-        currentDayLowTime := time
-
+    currentDayHigh := na(currentDayHigh) ? high : math.max(currentDayHigh, high)
+    currentDayLow := na(currentDayLow) ? low : math.min(currentDayLow, low)
     currentDayClose := close
-    currentDayCloseTime := time
 
 int currentWeekKey = time("1W")
-
 var int trackedWeekKey = na
 var float currentWeekHigh = na
 var float currentWeekLow = na
-var int currentWeekHighTime = na
-var int currentWeekLowTime = na
-
 var float previousWeekHigh = na
 var float previousWeekLow = na
-var int previousWeekHighTime = na
-var int previousWeekLowTime = na
-
+var int previousWeekKnownBar = na
 if na(trackedWeekKey)
     trackedWeekKey := currentWeekKey
-
 bool weekChanged = not na(trackedWeekKey) and currentWeekKey != trackedWeekKey
-
 if weekChanged
     if not na(currentWeekHigh)
         previousWeekHigh := currentWeekHigh
         previousWeekLow := currentWeekLow
-        previousWeekHighTime := currentWeekHighTime
-        previousWeekLowTime := currentWeekLowTime
-
-    if not na(pwhLine)
-        line.delete(pwhLine)
-    if not na(pwlLine)
-        line.delete(pwlLine)
-    if not na(pwhLabel)
-        label.delete(pwhLabel)
-    if not na(pwlLabel)
-        label.delete(pwlLabel)
-
-    pwhLine := na
-    pwlLine := na
-    pwhLabel := na
-    pwlLabel := na
-
-    if showPriorWeek and not na(previousWeekHigh)
-        pwhLine := f_newLine(previousWeekHighTime, previousWeekHigh, priorWeekColor, majorLineWidth, priorWeekStyleInput)
-        pwlLine := f_newLine(previousWeekLowTime, previousWeekLow, priorWeekColor, majorLineWidth, priorWeekStyleInput)
-
-        if showLabels
-            pwhLabel := f_newLabel(previousWeekHigh, "PWH", priorWeekColor)
-            pwlLabel := f_newLabel(previousWeekLow, "PWL", priorWeekColor)
-
+        previousWeekKnownBar := bar_index
     trackedWeekKey := currentWeekKey
     currentWeekHigh := na
     currentWeekLow := na
-    currentWeekHighTime := na
-    currentWeekLowTime := na
-
 if inRth
-    if na(currentWeekHigh)
-        currentWeekHigh := high
-        currentWeekLow := low
-        currentWeekHighTime := time
-        currentWeekLowTime := time
-    else
-        if high > currentWeekHigh
-            currentWeekHigh := high
-            currentWeekHighTime := time
-
-        if low < currentWeekLow
-            currentWeekLow := low
-            currentWeekLowTime := time
+    currentWeekHigh := na(currentWeekHigh) ? high : math.max(currentWeekHigh, high)
+    currentWeekLow := na(currentWeekLow) ? low : math.min(currentWeekLow, low)
 
 var float premarketHigh = na
 var float premarketLow = na
-var int premarketHighTime = na
-var int premarketLowTime = na
-
+var int premarketDayKey = na
+var int premarketHighKnownBar = na
+var int premarketLowKnownBar = na
 if premarketStart
-    if not na(pmhLine)
-        line.delete(pmhLine)
-    if not na(pmlLine)
-        line.delete(pmlLine)
-    if not na(pmhLabel)
-        label.delete(pmhLabel)
-    if not na(pmlLabel)
-        label.delete(pmlLabel)
-
-    pmhLine := na
-    pmlLine := na
-    pmhLabel := na
-    pmlLabel := na
-
     premarketHigh := high
     premarketLow := low
-    premarketHighTime := time
-    premarketLowTime := time
-
-    if showPremarket
-        pmhLine := f_newLine(premarketHighTime, premarketHigh, premarketColor, minorLineWidth, premarketStyleInput)
-        pmlLine := f_newLine(premarketLowTime, premarketLow, premarketColor, minorLineWidth, premarketStyleInput)
-
-        if showLabels
-            pmhLabel := f_newLabel(premarketHigh, "PMH", premarketColor)
-            pmlLabel := f_newLabel(premarketLow, "PML", premarketColor)
-
+    premarketDayKey := calendarDayKey
+    premarketHighKnownBar := bar_index
+    premarketLowKnownBar := bar_index
 else if inPremarket
-    bool newPremarketHigh = na(premarketHigh) or high > premarketHigh
-    bool newPremarketLow = na(premarketLow) or low < premarketLow
-
-    if newPremarketHigh
+    if na(premarketHigh) or high > premarketHigh
         premarketHigh := high
-        premarketHighTime := time
-
-        if showPremarket and not na(pmhLine)
-            line.set_xy1(pmhLine, premarketHighTime, premarketHigh)
-            line.set_xy2(pmhLine, time_close, premarketHigh)
-
-    if newPremarketLow
+        premarketHighKnownBar := bar_index
+    if na(premarketLow) or low < premarketLow
         premarketLow := low
-        premarketLowTime := time
+        premarketLowKnownBar := bar_index
+    premarketDayKey := calendarDayKey
+if rthStart and (premarketDayKey != calendarDayKey or na(premarketHigh) or na(premarketLow))
+    premarketHigh := na
+    premarketLow := na
+    premarketHighKnownBar := na
+    premarketLowKnownBar := na
 
-        if showPremarket and not na(pmlLine)
-            line.set_xy1(pmlLine, premarketLowTime, premarketLow)
-            line.set_xy2(pmlLine, time_close, premarketLow)
-
-var int openingRangeStartTime = na
 var int openingRangeEndTime = na
+var int openingRangeStartBar = na
 var float openingRangeHigh = na
 var float openingRangeLow = na
-var int openingRangeHighTime = na
-var int openingRangeLowTime = na
 var bool openingRangeFinalized = false
-
+var int openingRangeKnownBar = na
+if premarketStart
+    openingRangeEndTime := na
+    openingRangeStartBar := na
+    openingRangeHigh := na
+    openingRangeLow := na
+    openingRangeFinalized := false
+    openingRangeKnownBar := na
 if rthStart
-    if not na(orhLine)
-        line.delete(orhLine)
-    if not na(orlLine)
-        line.delete(orlLine)
-    if not na(orhLabel)
-        label.delete(orhLabel)
-    if not na(orlLabel)
-        label.delete(orlLabel)
-    if not na(openingRangeBox)
-        box.delete(openingRangeBox)
-
-    orhLine := na
-    orlLine := na
-    orhLabel := na
-    orlLabel := na
-    openingRangeBox := na
-
-    openingRangeStartTime := time
     openingRangeEndTime := time + openingRangeMinutes * 60 * 1000
+    openingRangeStartBar := bar_index
     openingRangeHigh := high
     openingRangeLow := low
-    openingRangeHighTime := time
-    openingRangeLowTime := time
     openingRangeFinalized := false
-
-    if showOpeningRange
-        orhLine := f_newLine(openingRangeHighTime, openingRangeHigh, openingRangeColor, majorLineWidth, openingRangeStyleInput)
-        orlLine := f_newLine(openingRangeLowTime, openingRangeLow, openingRangeColor, majorLineWidth, openingRangeStyleInput)
-
-        if showLabels
-            orhLabel := f_newLabel(openingRangeHigh, "ORH", openingRangeColor)
-            orlLabel := f_newLabel(openingRangeLow, "ORL", openingRangeColor)
-
-        if showOpeningRangeBox
-            openingRangeBox := box.new(
-                 left = openingRangeStartTime,
-                 top = openingRangeHigh,
-                 right = time_close,
-                 bottom = openingRangeLow,
-                 xloc = xloc.bar_time,
-                 border_color = color.new(openingRangeColor, 15),
-                 border_width = 1,
-                 bgcolor = color.new(openingRangeColor, openingRangeTransparency)
-            )
-
+    openingRangeKnownBar := na
 bool inOpeningRange = inRth and not na(openingRangeEndTime) and time < openingRangeEndTime
-
 if inOpeningRange and not rthStart
-    bool newOpeningRangeHigh = high > openingRangeHigh
-    bool newOpeningRangeLow = low < openingRangeLow
-
-    if newOpeningRangeHigh
-        openingRangeHigh := high
-        openingRangeHighTime := time
-
-        if showOpeningRange and not na(orhLine)
-            line.set_xy1(orhLine, openingRangeHighTime, openingRangeHigh)
-            line.set_xy2(orhLine, time_close, openingRangeHigh)
-
-    if newOpeningRangeLow
-        openingRangeLow := low
-        openingRangeLowTime := time
-
-        if showOpeningRange and not na(orlLine)
-            line.set_xy1(orlLine, openingRangeLowTime, openingRangeLow)
-            line.set_xy2(orlLine, time_close, openingRangeLow)
-
-    if showOpeningRangeBox and not na(openingRangeBox)
-        box.set_top(openingRangeBox, openingRangeHigh)
-        box.set_bottom(openingRangeBox, openingRangeLow)
-        box.set_right(openingRangeBox, math.min(time_close, openingRangeEndTime))
-
+    openingRangeHigh := math.max(openingRangeHigh, high)
+    openingRangeLow := math.min(openingRangeLow, low)
 if inRth and not inOpeningRange and not openingRangeFinalized and not na(openingRangeEndTime)
-    if showOpeningRangeBox and not na(openingRangeBox)
-        box.set_right(openingRangeBox, openingRangeEndTime)
-
     openingRangeFinalized := true
+    openingRangeKnownBar := bar_index
+
+var bool gapActive = false
+var bool gapFilled = false
+var int gapDirection = 0
+var float gapHigh = na
+var float gapLow = na
+var float gapMid = na
+var float gapUnfilledBoundary = na
+var int gapKnownBar = na
+if premarketStart
+    gapActive := false
+    gapFilled := false
+    gapDirection := 0
+    gapHigh := na
+    gapLow := na
+    gapMid := na
+    gapUnfilledBoundary := na
+    gapKnownBar := na
+if rthStart
+    gapActive := useGapStructure and not na(previousDayClose) and not na(normalizationAtr) and normalizationAtr > 0.0 and math.abs(open - previousDayClose) >= normalizationAtr * gapMinimumAtr
+    gapFilled := false
+    gapDirection := gapActive ? (open > previousDayClose ? 1 : -1) : 0
+    gapHigh := gapActive ? math.max(open, previousDayClose) : na
+    gapLow := gapActive ? math.min(open, previousDayClose) : na
+    gapMid := gapActive ? (open + previousDayClose) * 0.5 : na
+    gapUnfilledBoundary := gapActive ? open : na
+    gapKnownBar := gapActive ? bar_index : na
+if gapActive and not gapFilled and inRth
+    gapUnfilledBoundary := gapDirection == 1 ? math.min(gapUnfilledBoundary, low) : math.max(gapUnfilledBoundary, high)
+    gapFilled := gapDirection == 1 ? gapUnfilledBoundary <= gapLow : gapDirection == -1 ? gapUnfilledBoundary >= gapHigh : true
 
 bool dailyVwapAnchor = rthStart
-
 float sessionVwap = ta.vwap(vwapSource, dailyVwapAnchor)
-[_, upperBand1, lowerBand1] = ta.vwap(
-     vwapSource,
-     dailyVwapAnchor,
-     vwapBand1Multiplier
+[_, upperBand1, lowerBand1] = ta.vwap(vwapSource, dailyVwapAnchor, vwapBand1Multiplier)
+[_, upperBand2, lowerBand2] = ta.vwap(vwapSource, dailyVwapAnchor, vwapBand2Multiplier)
+float fastEma = ta.ema(close, 9)
+float slowEma = ta.ema(close, 21)
+
+float earningsActual = request.earnings(
+     syminfo.tickerid,
+     earnings.actual,
+     barmerge.gaps_on,
+     barmerge.lookahead_off,
+     true
 )
-[_, upperBand2, lowerBand2] = ta.vwap(
-     vwapSource,
-     dailyVwapAnchor,
-     vwapBand2Multiplier
-)
+var int lastEarningsDayKey = na
+var bool pendingEventAnchor = false
+var bool manualAnchorConsumed = false
+var int eventAnchorTime = na
+var int eventAnchorBar = na
+var float eventCumPV = 0.0
+var float eventCumVolume = 0.0
+var int eventBars = 0
 
-bool showCurrentVwapBar = inRth and not rthStart
+bool autoEventObserved = eventAnchorMode == "Automatic earnings" and not na(earningsActual) and (na(lastEarningsDayKey) or calendarDayKey != lastEarningsDayKey)
+bool manualEventObserved = eventAnchorMode == "Manual timestamp" and manualEventTime > 0 and not manualAnchorConsumed and time >= manualEventTime and (na(time[1]) or time[1] < manualEventTime)
+bool startEventAnchorNow = false
+if autoEventObserved
+    lastEarningsDayKey := calendarDayKey
+    if inRth
+        startEventAnchorNow := true
+    else
+        pendingEventAnchor := true
+if manualEventObserved
+    manualAnchorConsumed := true
+    if inRth
+        startEventAnchorNow := true
+    else
+        pendingEventAnchor := true
+if pendingEventAnchor and rthStart
+    startEventAnchorNow := true
+    pendingEventAnchor := false
+if startEventAnchorNow
+    eventAnchorTime := time
+    eventAnchorBar := bar_index
+    eventCumPV := 0.0
+    eventCumVolume := 0.0
+    eventBars := 0
+if eventAnchorMode != "Disabled" and not na(eventAnchorTime) and time >= eventAnchorTime
+    if not na(volume) and volume > 0.0
+        eventCumPV += hlc3 * volume
+        eventCumVolume += volume
+    eventBars += 1
+float eventAvwap = eventCumVolume > 0.0 ? eventCumPV / eventCumVolume : na
+float eventAgeDays = not na(eventAnchorTime) ? math.max(time - eventAnchorTime, 0) / 86400000.0 : na
+float eventRecency = not na(eventAgeDays) ? 100.0 / (1.0 + eventAgeDays / math.max(eventMaxAgeDays * 0.5, 1.0)) : na
+bool eventCandidateValid = eventAnchorMode != "Disabled" and not na(eventAvwap) and eventBars >= eventMinBars and not na(eventAgeDays) and eventAgeDays <= eventMaxAgeDays and not na(normalizationAtr) and math.abs(eventAvwap - close) <= normalizationAtr * eventMaxDistanceAtr
 
-vwapPlot = plot(
-     showVwap and showCurrentVwapBar ? sessionVwap : na,
-     title = "Daily RTH VWAP",
-     color = vwapColor,
-     linewidth = 2,
-     style = plot.style_linebr
-)
+var array<PivotRecord> pivots = array.new<PivotRecord>()
+float confirmedPivotHigh = ta.pivothigh(high, pivotLeftBars, pivotRightBars)
+float confirmedPivotLow = ta.pivotlow(low, pivotLeftBars, pivotRightBars)
+float pivotConfirmationLow = ta.lowest(low, pivotRightBars + 1)
+float pivotConfirmationHigh = ta.highest(high, pivotRightBars + 1)
+bool newPivotAdded = false
 
-upperBand1Plot = plot(
-     showVwap and showVwapBand1 and showCurrentVwapBar ? upperBand1 : na,
-     title = "VWAP +1σ",
-     color = color.new(vwapBandColor, 20),
-     linewidth = 1,
-     style = plot.style_linebr
-)
+if barstate.isconfirmed and usePivots and not na(confirmedPivotHigh)
+    float originAtr = normalizationAtr[pivotRightBars]
+    float excursion = not na(originAtr) and originAtr > 0.0 ? (confirmedPivotHigh - pivotConfirmationLow) / originAtr : 0.0
+    float baseWeight = f_clamp(55.0 + excursion * 10.0, 55.0, 75.0)
+    float originImpulse = f_positiveSat(excursion)
+    float originRvol = not na(volumeBaseline[pivotRightBars]) and volumeBaseline[pivotRightBars] > 0.0 ? volume[pivotRightBars] / volumeBaseline[pivotRightBars] : na
+    float originVolume = f_participationScore(originRvol)
+    bool merged = false
+    if pivots.size() > 0
+        for pivot in pivots
+            if pivot.polarity == -1 and math.abs(pivot.price - confirmedPivotHigh) <= math.max(syminfo.mintick * 2.0, normalizationAtr * 0.015)
+                pivot.pivotBar := bar_index - pivotRightBars
+                pivot.baseWeight := math.max(pivot.baseWeight, baseWeight)
+                pivot.originImpulse := math.max(pivot.originImpulse, originImpulse)
+                pivot.originVolume := na(pivot.originVolume) ? originVolume : na(originVolume) ? pivot.originVolume : math.max(pivot.originVolume, originVolume)
+                merged := true
+                newPivotAdded := true
+    if not merged
+        pivots.push(PivotRecord.new(confirmedPivotHigh, -1, bar_index - pivotRightBars, bar_index, baseWeight, originImpulse, originVolume))
+        newPivotAdded := true
 
-lowerBand1Plot = plot(
-     showVwap and showVwapBand1 and showCurrentVwapBar ? lowerBand1 : na,
-     title = "VWAP -1σ",
-     color = color.new(vwapBandColor, 20),
-     linewidth = 1,
-     style = plot.style_linebr
-)
+if barstate.isconfirmed and usePivots and not na(confirmedPivotLow)
+    float originAtr = normalizationAtr[pivotRightBars]
+    float excursion = not na(originAtr) and originAtr > 0.0 ? (pivotConfirmationHigh - confirmedPivotLow) / originAtr : 0.0
+    float baseWeight = f_clamp(55.0 + excursion * 10.0, 55.0, 75.0)
+    float originImpulse = f_positiveSat(excursion)
+    float originRvol = not na(volumeBaseline[pivotRightBars]) and volumeBaseline[pivotRightBars] > 0.0 ? volume[pivotRightBars] / volumeBaseline[pivotRightBars] : na
+    float originVolume = f_participationScore(originRvol)
+    bool merged = false
+    if pivots.size() > 0
+        for pivot in pivots
+            if pivot.polarity == 1 and math.abs(pivot.price - confirmedPivotLow) <= math.max(syminfo.mintick * 2.0, normalizationAtr * 0.015)
+                pivot.pivotBar := bar_index - pivotRightBars
+                pivot.baseWeight := math.max(pivot.baseWeight, baseWeight)
+                pivot.originImpulse := math.max(pivot.originImpulse, originImpulse)
+                pivot.originVolume := na(pivot.originVolume) ? originVolume : na(originVolume) ? pivot.originVolume : math.max(pivot.originVolume, originVolume)
+                merged := true
+                newPivotAdded := true
+    if not merged
+        pivots.push(PivotRecord.new(confirmedPivotLow, 1, bar_index - pivotRightBars, bar_index, baseWeight, originImpulse, originVolume))
+        newPivotAdded := true
 
-upperBand2Plot = plot(
-     showVwap and showVwapBand2 and showCurrentVwapBar ? upperBand2 : na,
-     title = "VWAP +2σ",
-     color = color.new(vwapBandColor, 50),
-     linewidth = 1,
-     style = plot.style_linebr
-)
+int pivotIndex = 0
+while pivotIndex < pivots.size()
+    PivotRecord pivot = pivots.get(pivotIndex)
+    if bar_index - pivot.pivotBar > pivotMaxAgeBars
+        pivots.remove(pivotIndex)
+    else
+        pivotIndex += 1
+while pivots.size() > maxPivotRecords
+    pivots.shift()
 
-lowerBand2Plot = plot(
-     showVwap and showVwapBand2 and showCurrentVwapBar ? lowerBand2 : na,
-     title = "VWAP -2σ",
-     color = color.new(vwapBandColor, 50),
-     linewidth = 1,
-     style = plot.style_linebr
-)
+var ActiveZone supportZone = f_emptyZone()
+var ActiveZone resistanceZone = f_emptyZone()
+var FlipWatch supportBreakWatch = f_emptyFlipWatch()
+var FlipWatch resistanceBreakWatch = f_emptyFlipWatch()
 
-fill(
-     upperBand1Plot,
-     lowerBand1Plot,
-     color = showVwap and showVwapBand1 ? color.new(vwapBandColor, vwapBandTransparency) : na,
-     title = "VWAP Band 1 Fill"
-)
+bool enteredSupport = false
+bool enteredResistance = false
+bool supportRejection = false
+bool resistanceRejection = false
+bool supportBreakAcceptance = false
+bool resistanceBreakAcceptance = false
+bool zoneFlip = false
+bool higherQualityZoneSelected = false
+bool zoneInvalidated = false
 
-fill(
-     upperBand2Plot,
-     lowerBand2Plot,
-     color = showVwap and showVwapBand2 ? color.new(vwapBandColor, vwapBandTransparency) : na,
-     title = "VWAP Band 2 Fill"
-)
+if barstate.isconfirmed and supportZone.valid and supportZone.state == STATE_BROKEN and bar_index > supportZone.stateBar
+    supportZone := f_emptyZone()
+if barstate.isconfirmed and resistanceZone.valid and resistanceZone.state == STATE_BROKEN and bar_index > resistanceZone.stateBar
+    resistanceZone := f_emptyZone()
 
-float fastEma = ta.ema(close, fastEmaLength)
-float slowEma = ta.ema(close, slowEmaLength)
+if barstate.isconfirmed and supportZone.valid
+    bool overlap = high >= supportZone.low and low <= supportZone.high
+    bool beyond = close < supportZone.low
+    float distance = close > supportZone.high ? (close - supportZone.high) / math.max(normalizationAtr, syminfo.mintick) : 0.0
+    int previousState = supportZone.state
+    bool closeInside = close >= supportZone.low and close <= supportZone.high
+    enteredSupport := overlap and previousState != STATE_INSIDE and previousState != STATE_REJECTING and previousState != STATE_ACCEPTING and previousState != STATE_FLIPPED
+    supportZone.insideCloses := closeInside ? supportZone.insideCloses + 1 : 0
+    supportZone.beyondCloses := beyond ? supportZone.beyondCloses + 1 : 0
+    bool hardBreak = close < supportZone.low - normalizationAtr * breakDisplacementAtr
+    bool confirmedBreak = hardBreak or supportZone.beyondCloses >= breakClosesRequired
+    bool rejection = overlap and close > supportZone.high + normalizationAtr * rejectionDisplacementAtr
+    bool accepting = (supportZone.insideCloses >= acceptanceClosesRequired or supportZone.beyondCloses > 0) and not rejection and not confirmedBreak
+    if confirmedBreak
+        supportZone.state := STATE_BROKEN
+        supportZone.stateBar := bar_index
+        supportBreakWatch := f_zoneToFlipWatch(supportZone)
+        supportBreakAcceptance := previousState != STATE_BROKEN
+        zoneInvalidated := true
+    else if rejection
+        supportZone.state := STATE_REJECTING
+        supportZone.stateBar := bar_index
+        supportRejection := previousState != STATE_REJECTING
+    else if accepting
+        supportZone.state := STATE_ACCEPTING
+        supportZone.stateBar := bar_index
+        supportBreakAcceptance := previousState != STATE_ACCEPTING
+    else if overlap
+        supportZone.state := STATE_INSIDE
+        supportZone.stateBar := previousState != STATE_INSIDE ? bar_index : supportZone.stateBar
+    else if previousState == STATE_REJECTING or previousState == STATE_ACCEPTING or previousState == STATE_FLIPPED
+        if bar_index - supportZone.stateBar > stateHoldBars
+            supportZone.state := distance <= approachingAtr ? STATE_APPROACHING : STATE_DISTANT
+    else
+        supportZone.state := distance <= approachingAtr ? STATE_APPROACHING : STATE_DISTANT
 
-plot(
-     showEmas ? fastEma : na,
-     title = "Fast EMA",
-     color = fastEmaColor,
-     linewidth = 1
-)
+if barstate.isconfirmed and resistanceZone.valid
+    bool overlap = high >= resistanceZone.low and low <= resistanceZone.high
+    bool beyond = close > resistanceZone.high
+    float distance = close < resistanceZone.low ? (resistanceZone.low - close) / math.max(normalizationAtr, syminfo.mintick) : 0.0
+    int previousState = resistanceZone.state
+    bool closeInside = close >= resistanceZone.low and close <= resistanceZone.high
+    enteredResistance := overlap and previousState != STATE_INSIDE and previousState != STATE_REJECTING and previousState != STATE_ACCEPTING and previousState != STATE_FLIPPED
+    resistanceZone.insideCloses := closeInside ? resistanceZone.insideCloses + 1 : 0
+    resistanceZone.beyondCloses := beyond ? resistanceZone.beyondCloses + 1 : 0
+    bool hardBreak = close > resistanceZone.high + normalizationAtr * breakDisplacementAtr
+    bool confirmedBreak = hardBreak or resistanceZone.beyondCloses >= breakClosesRequired
+    bool rejection = overlap and close < resistanceZone.low - normalizationAtr * rejectionDisplacementAtr
+    bool accepting = (resistanceZone.insideCloses >= acceptanceClosesRequired or resistanceZone.beyondCloses > 0) and not rejection and not confirmedBreak
+    if confirmedBreak
+        resistanceZone.state := STATE_BROKEN
+        resistanceZone.stateBar := bar_index
+        resistanceBreakWatch := f_zoneToFlipWatch(resistanceZone)
+        resistanceBreakAcceptance := previousState != STATE_BROKEN
+        zoneInvalidated := true
+    else if rejection
+        resistanceZone.state := STATE_REJECTING
+        resistanceZone.stateBar := bar_index
+        resistanceRejection := previousState != STATE_REJECTING
+    else if accepting
+        resistanceZone.state := STATE_ACCEPTING
+        resistanceZone.stateBar := bar_index
+        resistanceBreakAcceptance := previousState != STATE_ACCEPTING
+    else if overlap
+        resistanceZone.state := STATE_INSIDE
+        resistanceZone.stateBar := previousState != STATE_INSIDE ? bar_index : resistanceZone.stateBar
+    else if previousState == STATE_REJECTING or previousState == STATE_ACCEPTING or previousState == STATE_FLIPPED
+        if bar_index - resistanceZone.stateBar > stateHoldBars
+            resistanceZone.state := distance <= approachingAtr ? STATE_APPROACHING : STATE_DISTANT
+    else
+        resistanceZone.state := distance <= approachingAtr ? STATE_APPROACHING : STATE_DISTANT
 
-plot(
-     showEmas ? slowEma : na,
-     title = "Slow EMA",
-     color = slowEmaColor,
-     linewidth = 1
-)
+if barstate.isconfirmed and supportBreakWatch.valid
+    bool expired = time - supportBreakWatch.brokenTime > flipWatchMinutes * 60 * 1000
+    bool retested = high >= supportBreakWatch.low - normalizationAtr * flipRetestAtr and low <= supportBreakWatch.high + normalizationAtr * flipRetestAtr
+    bool heldAsResistance = time > supportBreakWatch.brokenTime and retested and close < supportBreakWatch.low - normalizationAtr * rejectionDisplacementAtr
+    if heldAsResistance
+        ActiveZone flipped = f_zoneFromFlipWatch(supportBreakWatch, -1)
+        bool activateFlip = not resistanceZone.valid or flipped.actionability >= resistanceZone.actionability or flipped.strength >= resistanceZone.strength + switchMargin
+        if activateFlip
+            resistanceZone := flipped
+            zoneFlip := true
+        supportBreakWatch := f_emptyFlipWatch()
+    else if expired
+        supportBreakWatch := f_emptyFlipWatch()
 
-if barstate.islast and showLabels
-    f_updateLabel(pdhLabel, f_labelX(0), previousDayHigh, "PDH", priorDayColor)
-    f_updateLabel(pdlLabel, f_labelX(0), previousDayLow, "PDL", priorDayColor)
+if barstate.isconfirmed and resistanceBreakWatch.valid
+    bool expired = time - resistanceBreakWatch.brokenTime > flipWatchMinutes * 60 * 1000
+    bool retested = high >= resistanceBreakWatch.low - normalizationAtr * flipRetestAtr and low <= resistanceBreakWatch.high + normalizationAtr * flipRetestAtr
+    bool heldAsSupport = time > resistanceBreakWatch.brokenTime and retested and close > resistanceBreakWatch.high + normalizationAtr * rejectionDisplacementAtr
+    if heldAsSupport
+        ActiveZone flipped = f_zoneFromFlipWatch(resistanceBreakWatch, 1)
+        bool activateFlip = not supportZone.valid or flipped.actionability >= supportZone.actionability or flipped.strength >= supportZone.strength + switchMargin
+        if activateFlip
+            supportZone := flipped
+            zoneFlip := true
+        resistanceBreakWatch := f_emptyFlipWatch()
+    else if expired
+        resistanceBreakWatch := f_emptyFlipWatch()
 
-    f_updateLabel(pdcLabel, f_labelX(1), previousDayClose, "PDC", priorCloseColor)
-    f_updateLabel(sessionOpenLabel, f_labelX(2), currentSessionOpen, "RTH OPEN", sessionOpenColor)
+bool rebuildClusters = barstate.isconfirmed and not na(normalizationAtr) and normalizationAtr > 0.0 and (newPivotAdded or rthStart or premarketStart or zoneInvalidated or bar_index % refreshBars == 0)
 
-    f_updateLabel(pmhLabel, f_labelX(3), premarketHigh, "PMH", premarketColor)
-    f_updateLabel(pmlLabel, f_labelX(4), premarketLow, "PML", premarketColor)
+if rebuildClusters
+    array<LevelCandidate> registry = array.new<LevelCandidate>()
+    if usePriorDay
+        f_addCandidate(registry, previousDayHigh, 75.0, SRC_PDH, -1, na, previousDayKnownBar, na, na, na, true, normalizationAtr, maximumCandidateDistance)
+        f_addCandidate(registry, previousDayLow, 75.0, SRC_PDL, 1, na, previousDayKnownBar, na, na, na, true, normalizationAtr, maximumCandidateDistance)
+        f_addCandidate(registry, previousDayClose, 55.0, SRC_PDC, 0, na, previousDayKnownBar, na, na, na, true, normalizationAtr, maximumCandidateDistance)
+    if usePriorWeek
+        f_addCandidate(registry, previousWeekHigh, 80.0, SRC_PWH, -1, na, previousWeekKnownBar, na, na, na, true, normalizationAtr, maximumCandidateDistance)
+        f_addCandidate(registry, previousWeekLow, 80.0, SRC_PWL, 1, na, previousWeekKnownBar, na, na, na, true, normalizationAtr, maximumCandidateDistance)
+    if usePremarket and not na(premarketHigh) and not na(premarketLow)
+        float premarketWeight = inPremarket ? 55.0 : 65.0
+        f_addCandidate(registry, premarketHigh, premarketWeight, SRC_PMH, -1, na, premarketHighKnownBar, na, na, na, true, normalizationAtr, maximumCandidateDistance)
+        f_addCandidate(registry, premarketLow, premarketWeight, SRC_PML, 1, na, premarketLowKnownBar, na, na, na, true, normalizationAtr, maximumCandidateDistance)
+    if useOpeningRange and openingRangeFinalized
+        f_addCandidate(registry, openingRangeHigh, 65.0, SRC_ORH, -1, na, openingRangeKnownBar, na, na, na, true, normalizationAtr, maximumCandidateDistance)
+        f_addCandidate(registry, openingRangeLow, 65.0, SRC_ORL, 1, na, openingRangeKnownBar, na, na, na, true, normalizationAtr, maximumCandidateDistance)
+    if useRthOpen
+        float rthOpenWeight = gapActive and not gapFilled ? 55.0 : 45.0
+        f_addCandidate(registry, currentSessionOpen, rthOpenWeight, SRC_RTH_OPEN, 0, na, currentSessionOpenKnownBar, na, na, na, true, normalizationAtr, maximumCandidateDistance)
+    if useGapStructure and gapActive and not gapFilled
+        if not usePriorDay
+            f_addCandidate(registry, previousDayClose, 55.0, SRC_GAP, 0, na, gapKnownBar, na, na, 100.0, true, normalizationAtr, maximumCandidateDistance)
+        if not useRthOpen
+            f_addCandidate(registry, currentSessionOpen, 55.0, SRC_GAP, 0, na, gapKnownBar, na, na, 100.0, true, normalizationAtr, maximumCandidateDistance)
+        f_addCandidate(registry, gapMid, 35.0, SRC_GAP, 0, na, gapKnownBar, na, na, 100.0, true, normalizationAtr, maximumCandidateDistance)
+        bool distinctGapBoundary = not na(gapUnfilledBoundary) and math.abs(gapUnfilledBoundary - gapMid) > clusterTolerance and math.abs(gapUnfilledBoundary - currentSessionOpen) > clusterTolerance and math.abs(gapUnfilledBoundary - previousDayClose) > clusterTolerance
+        if distinctGapBoundary
+            int gapBoundaryPolarity = gapDirection == 1 ? 1 : -1
+            f_addCandidate(registry, gapUnfilledBoundary, 55.0, SRC_GAP, gapBoundaryPolarity, bar_index, bar_index, na, na, 100.0, false, normalizationAtr, maximumCandidateDistance)
+    if useVwapCandidate and inRth and not na(sessionVwap)
+        f_addCandidate(registry, sessionVwap, 55.0, SRC_VWAP, 0, bar_index, bar_index, na, na, 100.0, false, normalizationAtr, maximumCandidateDistance)
+    if useVwapBandCandidates and inRth
+        f_addCandidate(registry, upperBand1, 25.0, SRC_VWAP_BAND, -1, bar_index, bar_index, na, na, 100.0, false, normalizationAtr, maximumCandidateDistance)
+        f_addCandidate(registry, lowerBand1, 25.0, SRC_VWAP_BAND, 1, bar_index, bar_index, na, na, 100.0, false, normalizationAtr, maximumCandidateDistance)
+    if eventCandidateValid
+        float eventSourceWeight = 75.0 * (0.60 + 0.40 * eventRecency / 100.0)
+        f_addCandidate(registry, eventAvwap, eventSourceWeight, SRC_EVENT_AVWAP, 0, eventAnchorBar, eventAnchorBar, na, na, eventRecency, false, normalizationAtr, maximumCandidateDistance)
+    if useAtrProjections and not na(currentSessionOpen)
+        f_addCandidate(registry, currentSessionOpen + normalizationAtr * 0.5, 20.0, SRC_ATR_PROJECTION, -1, currentSessionOpenKnownBar, currentSessionOpenKnownBar, na, na, 100.0, false, normalizationAtr, maximumCandidateDistance)
+        f_addCandidate(registry, currentSessionOpen - normalizationAtr * 0.5, 20.0, SRC_ATR_PROJECTION, 1, currentSessionOpenKnownBar, currentSessionOpenKnownBar, na, na, 100.0, false, normalizationAtr, maximumCandidateDistance)
+        f_addCandidate(registry, currentSessionOpen + normalizationAtr, 20.0, SRC_ATR_PROJECTION, -1, currentSessionOpenKnownBar, currentSessionOpenKnownBar, na, na, 100.0, false, normalizationAtr, maximumCandidateDistance)
+        f_addCandidate(registry, currentSessionOpen - normalizationAtr, 20.0, SRC_ATR_PROJECTION, 1, currentSessionOpenKnownBar, currentSessionOpenKnownBar, na, na, 100.0, false, normalizationAtr, maximumCandidateDistance)
+        if not na(previousDayClose)
+            f_addCandidate(registry, previousDayClose + normalizationAtr, 20.0, SRC_ATR_PROJECTION, -1, previousDayKnownBar, previousDayKnownBar, na, na, 100.0, false, normalizationAtr, maximumCandidateDistance)
+            f_addCandidate(registry, previousDayClose - normalizationAtr, 20.0, SRC_ATR_PROJECTION, 1, previousDayKnownBar, previousDayKnownBar, na, na, 100.0, false, normalizationAtr, maximumCandidateDistance)
+    if useRoundNumbers
+        f_addRoundCandidates(registry, normalizationAtr)
+    if usePivots and pivots.size() > 0
+        for pivot in pivots
+            int sourceType = pivot.polarity == -1 ? SRC_PIVOT_HIGH : SRC_PIVOT_LOW
+            f_addCandidate(registry, pivot.price, pivot.baseWeight, sourceType, pivot.polarity, pivot.pivotBar, pivot.knownBar, pivot.originImpulse, pivot.originVolume, na, true, normalizationAtr, maximumCandidateDistance)
 
-    f_updateLabel(pwhLabel, f_labelX(5), previousWeekHigh, "PWH", priorWeekColor)
-    f_updateLabel(pwlLabel, f_labelX(5), previousWeekLow, "PWL", priorWeekColor)
+    array<Cluster> clusters = f_buildClusters(registry, clusterTolerance, normalizationAtr)
+    int supportMatchIndex = f_matchingClusterIndex(clusters, supportZone, clusterTolerance)
+    int resistanceMatchIndex = f_matchingClusterIndex(clusters, resistanceZone, clusterTolerance)
+    if supportZone.valid
+        if supportMatchIndex >= 0
+            supportZone := f_refreshZone(supportZone, clusters.get(supportMatchIndex))
+        else
+            supportZone.missedRefreshes += 1
+            if supportZone.missedRefreshes >= 3 or rthStart or premarketStart
+                supportZone := f_emptyZone()
+    if resistanceZone.valid
+        if resistanceMatchIndex >= 0
+            resistanceZone := f_refreshZone(resistanceZone, clusters.get(resistanceMatchIndex))
+        else
+            resistanceZone.missedRefreshes += 1
+            if resistanceZone.missedRefreshes >= 3 or rthStart or premarketStart
+                resistanceZone := f_emptyZone()
 
-    f_updateLabel(orhLabel, f_labelX(6), openingRangeHigh, "ORH", openingRangeColor)
-    f_updateLabel(orlLabel, f_labelX(7), openingRangeLow, "ORL", openingRangeColor)
+    int bestSupportIndex = f_bestClusterIndex(clusters, 1, resistanceBreakWatch, clusterTolerance)
+    int bestResistanceIndex = f_bestClusterIndex(clusters, -1, supportBreakWatch, clusterTolerance)
 
-bool rawPdhBreak = ta.crossover(close, previousDayHigh)
-bool rawPdlBreak = ta.crossunder(close, previousDayLow)
+    if bestSupportIndex >= 0
+        Cluster bestSupport = clusters.get(bestSupportIndex)
+        bool sameSupport = supportZone.valid and (bestSupport.high >= supportZone.low and bestSupport.low <= supportZone.high or math.abs(bestSupport.center - supportZone.center) <= clusterTolerance * 1.5)
+        if not supportZone.valid
+            int initialState = bestSupport.high >= low and bestSupport.low <= high ? STATE_INSIDE : math.abs(bestSupport.center - close) / normalizationAtr <= approachingAtr ? STATE_APPROACHING : STATE_DISTANT
+            supportZone := f_zoneFromCluster(bestSupport, 1, initialState, bar_index)
+            enteredSupport := enteredSupport or initialState == STATE_INSIDE
+        else if not sameSupport and (bestSupport.strength >= supportZone.strength + switchMargin or bestSupport.actionability >= supportZone.actionability + switchMargin)
+            int replacementState = bestSupport.high >= low and bestSupport.low <= high ? STATE_INSIDE : math.abs(bestSupport.center - close) / normalizationAtr <= approachingAtr ? STATE_APPROACHING : STATE_DISTANT
+            supportZone := f_zoneFromCluster(bestSupport, 1, replacementState, bar_index)
+            enteredSupport := enteredSupport or replacementState == STATE_INSIDE
+            higherQualityZoneSelected := true
 
-bool rawPmhBreak = ta.crossover(close, premarketHigh)
-bool rawPmlBreak = ta.crossunder(close, premarketLow)
+    if bestResistanceIndex >= 0
+        Cluster bestResistance = clusters.get(bestResistanceIndex)
+        bool sameResistance = resistanceZone.valid and (bestResistance.high >= resistanceZone.low and bestResistance.low <= resistanceZone.high or math.abs(bestResistance.center - resistanceZone.center) <= clusterTolerance * 1.5)
+        if not resistanceZone.valid
+            int initialState = bestResistance.high >= low and bestResistance.low <= high ? STATE_INSIDE : math.abs(bestResistance.center - close) / normalizationAtr <= approachingAtr ? STATE_APPROACHING : STATE_DISTANT
+            resistanceZone := f_zoneFromCluster(bestResistance, -1, initialState, bar_index)
+            enteredResistance := enteredResistance or initialState == STATE_INSIDE
+        else if not sameResistance and (bestResistance.strength >= resistanceZone.strength + switchMargin or bestResistance.actionability >= resistanceZone.actionability + switchMargin)
+            int replacementState = bestResistance.high >= low and bestResistance.low <= high ? STATE_INSIDE : math.abs(bestResistance.center - close) / normalizationAtr <= approachingAtr ? STATE_APPROACHING : STATE_DISTANT
+            resistanceZone := f_zoneFromCluster(bestResistance, -1, replacementState, bar_index)
+            enteredResistance := enteredResistance or replacementState == STATE_INSIDE
+            higherQualityZoneSelected := true
 
-bool rawPwhBreak = ta.crossover(close, previousWeekHigh)
-bool rawPwlBreak = ta.crossunder(close, previousWeekLow)
+bool showKeyReferences = displayMode == "Zones + Key References" or displayMode == "Legacy / Debug"
+bool showLegacy = displayMode == "Legacy / Debug"
+bool showCurrentVwapBar = inRth
 
-bool rawOrhBreak = ta.crossover(close, openingRangeHigh)
-bool rawOrlBreak = ta.crossunder(close, openingRangeLow)
+plot(showKeyReferences and usePriorDay ? previousDayHigh : na, "PDH", color.new(#E4E4E7, 35), 1, plot.style_linebr)
+plot(showKeyReferences and usePriorDay ? previousDayLow : na, "PDL", color.new(#E4E4E7, 35), 1, plot.style_linebr)
+plot(showKeyReferences and usePriorDay ? previousDayClose : na, "PDC", color.new(#7DD3FC, 45), 1, plot.style_linebr)
+plot(showKeyReferences and usePriorWeek ? previousWeekHigh : na, "PWH", color.new(#D4D4D8, 55), 1, plot.style_linebr)
+plot(showKeyReferences and usePriorWeek ? previousWeekLow : na, "PWL", color.new(#D4D4D8, 55), 1, plot.style_linebr)
+plot(showKeyReferences and usePremarket ? premarketHigh : na, "PMH", color.new(#67E8F9, 45), 1, plot.style_linebr)
+plot(showKeyReferences and usePremarket ? premarketLow : na, "PML", color.new(#67E8F9, 45), 1, plot.style_linebr)
+plot(showKeyReferences and useOpeningRange ? openingRangeHigh : na, "ORH", color.new(#FBBF24, 40), 1, plot.style_linebr)
+plot(showKeyReferences and useOpeningRange ? openingRangeLow : na, "ORL", color.new(#FBBF24, 40), 1, plot.style_linebr)
+plot(showKeyReferences and useRthOpen ? currentSessionOpen : na, "RTH Open", color.new(#BAE6FD, 50), 1, plot.style_linebr)
 
-bool rawVwapReclaim = ta.crossover(close, sessionVwap)
-bool rawVwapLoss = ta.crossunder(close, sessionVwap)
+plot(showVwap and showCurrentVwapBar ? sessionVwap : na, "RTH VWAP", #C4B5FD, 2, plot.style_linebr)
+plot(showVwap and showVwapBand1 and showCurrentVwapBar ? upperBand1 : na, "VWAP +1 stdev", color.new(#A78BFA, 35), 1, plot.style_linebr)
+plot(showVwap and showVwapBand1 and showCurrentVwapBar ? lowerBand1 : na, "VWAP -1 stdev", color.new(#A78BFA, 35), 1, plot.style_linebr)
+plot(showVwap and showVwapBand2 and showCurrentVwapBar ? upperBand2 : na, "VWAP +2 stdev", color.new(#A78BFA, 55), 1, plot.style_linebr)
+plot(showVwap and showVwapBand2 and showCurrentVwapBar ? lowerBand2 : na, "VWAP -2 stdev", color.new(#A78BFA, 55), 1, plot.style_linebr)
+plot(showLegacy and showEmas ? fastEma : na, "EMA 9", color.new(#38BDF8, 25), 1)
+plot(showLegacy and showEmas ? slowEma : na, "EMA 21", color.new(#FDE68A, 25), 1)
+plot(showLegacy and eventCandidateValid ? eventAvwap : na, "Event AVWAP", color.new(#F472B6, 15), 2, plot.style_linebr)
+plot(showLegacy and gapActive and not gapFilled ? gapHigh : na, "Active Gap High", color.new(#FB7185, 65), 1, plot.style_linebr)
+plot(showLegacy and gapActive and not gapFilled ? gapLow : na, "Active Gap Low", color.new(#34D399, 65), 1, plot.style_linebr)
+plot(showLegacy and gapActive and not gapFilled ? gapMid : na, "Active Gap Mid", color.new(#FBBF24, 70), 1, plot.style_linebr)
+plot(showLegacy and gapActive and not gapFilled ? gapUnfilledBoundary : na, "Active Gap Unfilled Boundary", color.new(#F8FAFC, 55), 1, plot.style_linebr)
 
-bool bullishVwapRejection =
-     inRth and
-     not na(sessionVwap) and
-     low <= sessionVwap and
-     close > sessionVwap and
-     close > open
+var box openingRangeBox = na
+var box supportBox = na
+var box resistanceBox = na
+var box buyEdgeBox = na
+var box sellEdgeBox = na
+if barstate.islast
+    if showOpeningRangeBox and useOpeningRange and not na(openingRangeStartBar) and not na(openingRangeHigh) and not na(openingRangeLow)
+        int orLeft = openingRangeStartBar
+        int orRight = openingRangeFinalized and not na(openingRangeKnownBar) ? openingRangeKnownBar : bar_index
+        if na(openingRangeBox)
+            openingRangeBox := box.new(
+                 left = orLeft,
+                 top = openingRangeHigh,
+                 right = orRight,
+                 bottom = openingRangeLow,
+                 xloc = xloc.bar_index,
+                 border_color = color.new(#FBBF24, 55),
+                 border_width = 1,
+                 bgcolor = color.new(#FBBF24, 90)
+            )
+        else
+            openingRangeBox.set_left(orLeft)
+            openingRangeBox.set_right(orRight)
+            openingRangeBox.set_top(openingRangeHigh)
+            openingRangeBox.set_bottom(openingRangeLow)
+            openingRangeBox.set_border_color(color.new(#FBBF24, 55))
+            openingRangeBox.set_bgcolor(color.new(#FBBF24, 90))
+    else if not na(openingRangeBox)
+        openingRangeBox.delete()
+        openingRangeBox := na
+    if supportZone.valid
+        int leftIndex = math.max(supportZone.selectedBar, bar_index - zoneBackBars)
+        int rightIndex = bar_index + zoneForwardBars
+        if na(supportBox)
+            supportBox := box.new(
+                 left = leftIndex,
+                 top = supportZone.high,
+                 right = rightIndex,
+                 bottom = supportZone.low,
+                 xloc = xloc.bar_index,
+                 border_color = f_zoneBorderColor(1, supportZone.state),
+                 border_width = supportZone.state == STATE_INSIDE or supportZone.state == STATE_REJECTING or supportZone.state == STATE_FLIPPED ? 2 : 1,
+                 bgcolor = f_zoneFillColor(1, supportZone.state),
+                 text = showZoneText ? f_zoneText(supportZone) : "",
+                 text_size = size.tiny,
+                 text_color = color.new(supportColor, 0),
+                 text_halign = text.align_right,
+                 text_valign = text.align_center,
+                 text_wrap = text.wrap_none,
+                 text_font_family = font.family_monospace
+            )
+        else
+            supportBox.set_left(leftIndex)
+            supportBox.set_right(rightIndex)
+            supportBox.set_top(supportZone.high)
+            supportBox.set_bottom(supportZone.low)
+            supportBox.set_bgcolor(f_zoneFillColor(1, supportZone.state))
+            supportBox.set_border_color(f_zoneBorderColor(1, supportZone.state))
+            supportBox.set_border_width(supportZone.state == STATE_INSIDE or supportZone.state == STATE_REJECTING or supportZone.state == STATE_FLIPPED ? 2 : 1)
+            supportBox.set_text(showZoneText ? f_zoneText(supportZone) : "")
+            supportBox.set_text_color(color.new(supportColor, 0))
+    else if not na(supportBox)
+        supportBox.delete()
+        supportBox := na
 
-bool bearishVwapRejection =
-     inRth and
-     not na(sessionVwap) and
-     high >= sessionVwap and
-     close < sessionVwap and
-     close < open
+    bool showBuyEdge = showEdgeSignals and supportZone.valid and supportZone.state != STATE_BROKEN and supportZone.actionability >= edgeSignalMinimumActionability
+    if showBuyEdge
+        int leftIndex = math.max(supportZone.selectedBar, bar_index - zoneBackBars)
+        int rightIndex = bar_index + zoneForwardBars
+        float parentHeight = math.max(supportZone.high - supportZone.low, syminfo.mintick * 2.0)
+        float edgeHeight = math.max(parentHeight * edgeSignalHeightPct, syminfo.mintick * 2.0)
+        float edgeTop = math.min(supportZone.low + edgeHeight, supportZone.high)
+        if na(buyEdgeBox)
+            buyEdgeBox := box.new(
+                 left = leftIndex,
+                 top = edgeTop,
+                 right = rightIndex,
+                 bottom = supportZone.low,
+                 xloc = xloc.bar_index,
+                 border_color = color.new(#14B8A6, 0),
+                 border_width = 1,
+                 bgcolor = color.new(#14B8A6, 72),
+                 text = showZoneText ? "BUY" : "",
+                 text_size = size.tiny,
+                 text_color = color.new(#CCFBF1, 0),
+                 text_halign = text.align_right,
+                 text_valign = text.align_center,
+                 text_wrap = text.wrap_none,
+                 text_font_family = font.family_monospace
+            )
+        else
+            buyEdgeBox.set_left(leftIndex)
+            buyEdgeBox.set_right(rightIndex)
+            buyEdgeBox.set_top(edgeTop)
+            buyEdgeBox.set_bottom(supportZone.low)
+            buyEdgeBox.set_border_color(color.new(#14B8A6, 0))
+            buyEdgeBox.set_bgcolor(color.new(#14B8A6, 72))
+            buyEdgeBox.set_text(showZoneText ? "BUY" : "")
+            buyEdgeBox.set_text_color(color.new(#CCFBF1, 0))
+    else if not na(buyEdgeBox)
+        buyEdgeBox.delete()
+        buyEdgeBox := na
 
-bool pdhBreak = enableAlerts and not na(previousDayHigh) and rawPdhBreak
-bool pdlBreak = enableAlerts and not na(previousDayLow) and rawPdlBreak
+    if resistanceZone.valid
+        int leftIndex = math.max(resistanceZone.selectedBar, bar_index - zoneBackBars)
+        int rightIndex = bar_index + zoneForwardBars
+        if na(resistanceBox)
+            resistanceBox := box.new(
+                 left = leftIndex,
+                 top = resistanceZone.high,
+                 right = rightIndex,
+                 bottom = resistanceZone.low,
+                 xloc = xloc.bar_index,
+                 border_color = f_zoneBorderColor(-1, resistanceZone.state),
+                 border_width = resistanceZone.state == STATE_INSIDE or resistanceZone.state == STATE_REJECTING or resistanceZone.state == STATE_FLIPPED ? 2 : 1,
+                 bgcolor = f_zoneFillColor(-1, resistanceZone.state),
+                 text = showZoneText ? f_zoneText(resistanceZone) : "",
+                 text_size = size.tiny,
+                 text_color = color.new(resistanceColor, 0),
+                 text_halign = text.align_right,
+                 text_valign = text.align_center,
+                 text_wrap = text.wrap_none,
+                 text_font_family = font.family_monospace
+            )
+        else
+            resistanceBox.set_left(leftIndex)
+            resistanceBox.set_right(rightIndex)
+            resistanceBox.set_top(resistanceZone.high)
+            resistanceBox.set_bottom(resistanceZone.low)
+            resistanceBox.set_bgcolor(f_zoneFillColor(-1, resistanceZone.state))
+            resistanceBox.set_border_color(f_zoneBorderColor(-1, resistanceZone.state))
+            resistanceBox.set_border_width(resistanceZone.state == STATE_INSIDE or resistanceZone.state == STATE_REJECTING or resistanceZone.state == STATE_FLIPPED ? 2 : 1)
+            resistanceBox.set_text(showZoneText ? f_zoneText(resistanceZone) : "")
+            resistanceBox.set_text_color(color.new(resistanceColor, 0))
+    else if not na(resistanceBox)
+        resistanceBox.delete()
+        resistanceBox := na
 
-bool pmhBreak = enableAlerts and not na(premarketHigh) and rawPmhBreak
-bool pmlBreak = enableAlerts and not na(premarketLow) and rawPmlBreak
+    bool showSellEdge = showEdgeSignals and resistanceZone.valid and resistanceZone.state != STATE_BROKEN and resistanceZone.actionability >= edgeSignalMinimumActionability
+    if showSellEdge
+        int leftIndex = math.max(resistanceZone.selectedBar, bar_index - zoneBackBars)
+        int rightIndex = bar_index + zoneForwardBars
+        float parentHeight = math.max(resistanceZone.high - resistanceZone.low, syminfo.mintick * 2.0)
+        float edgeHeight = math.max(parentHeight * edgeSignalHeightPct, syminfo.mintick * 2.0)
+        float edgeBottom = math.max(resistanceZone.high - edgeHeight, resistanceZone.low)
+        if na(sellEdgeBox)
+            sellEdgeBox := box.new(
+                 left = leftIndex,
+                 top = resistanceZone.high,
+                 right = rightIndex,
+                 bottom = edgeBottom,
+                 xloc = xloc.bar_index,
+                 border_color = color.new(#FB7185, 0),
+                 border_width = 1,
+                 bgcolor = color.new(#FB7185, 72),
+                 text = showZoneText ? "SELL" : "",
+                 text_size = size.tiny,
+                 text_color = color.new(#FFE4E6, 0),
+                 text_halign = text.align_right,
+                 text_valign = text.align_center,
+                 text_wrap = text.wrap_none,
+                 text_font_family = font.family_monospace
+            )
+        else
+            sellEdgeBox.set_left(leftIndex)
+            sellEdgeBox.set_right(rightIndex)
+            sellEdgeBox.set_top(resistanceZone.high)
+            sellEdgeBox.set_bottom(edgeBottom)
+            sellEdgeBox.set_border_color(color.new(#FB7185, 0))
+            sellEdgeBox.set_bgcolor(color.new(#FB7185, 72))
+            sellEdgeBox.set_text(showZoneText ? "SELL" : "")
+            sellEdgeBox.set_text_color(color.new(#FFE4E6, 0))
+    else if not na(sellEdgeBox)
+        sellEdgeBox.delete()
+        sellEdgeBox := na
 
-bool pwhBreak = enableAlerts and not na(previousWeekHigh) and rawPwhBreak
-bool pwlBreak = enableAlerts and not na(previousWeekLow) and rawPwlBreak
+var table dashboard = na
+if barstate.isfirst and showDashboard
+    dashboard := table.new(position.top_right, 2, 5, bgcolor = color.new(#090E17, 8), frame_color = color.new(#334155, 30), frame_width = 1)
+if barstate.islast and showDashboard and not na(dashboard)
+    string resistanceText = resistanceZone.valid ? str.tostring(resistanceZone.low, format.mintick) + "-" + str.tostring(resistanceZone.high, format.mintick) : "n/a"
+    string supportText = supportZone.valid ? str.tostring(supportZone.low, format.mintick) + "-" + str.tostring(supportZone.high, format.mintick) : "n/a"
+    string nearestState = "n/a"
+    if supportZone.valid and resistanceZone.valid
+        nearestState := math.abs(close - supportZone.center) <= math.abs(resistanceZone.center - close) ? "S " + f_stateText(supportZone.state) : "R " + f_stateText(resistanceZone.state)
+    else if supportZone.valid
+        nearestState := "S " + f_stateText(supportZone.state)
+    else if resistanceZone.valid
+        nearestState := "R " + f_stateText(resistanceZone.state)
+    table.cell(dashboard, 0, 0, "MERIDIAN LEVELS", text_color = #F8FAFC, text_size = size.small)
+    table.cell(dashboard, 1, 0, "v0.2.1", text_color = #94A3B8, text_size = size.small)
+    table.cell(dashboard, 0, 1, "Resistance", text_color = resistanceColor, text_size = size.small)
+    table.cell(dashboard, 1, 1, resistanceText, text_color = #F8FAFC, text_size = size.small)
+    table.cell(dashboard, 0, 2, "Support", text_color = supportColor, text_size = size.small)
+    table.cell(dashboard, 1, 2, supportText, text_color = #F8FAFC, text_size = size.small)
+    table.cell(dashboard, 0, 3, "State", text_color = #94A3B8, text_size = size.small)
+    table.cell(dashboard, 1, 3, nearestState, text_color = #F8FAFC, text_size = size.small)
+    table.cell(dashboard, 0, 4, "Daily ATR", text_color = #94A3B8, text_size = size.small)
+    table.cell(dashboard, 1, 4, str.tostring(normalizationAtr, format.mintick), text_color = #F8FAFC, text_size = size.small)
 
-bool orhBreak = enableAlerts and openingRangeFinalized and rawOrhBreak
-bool orlBreak = enableAlerts and openingRangeFinalized and rawOrlBreak
+var table debugDashboard = na
+if barstate.isfirst and showDashboard and showLegacy
+    debugDashboard := table.new(position.bottom_right, 2, 6, bgcolor = color.new(#090E17, 8), frame_color = color.new(#334155, 30), frame_width = 1)
+if barstate.islast and showDashboard and showLegacy and not na(debugDashboard)
+    string rMetrics = resistanceZone.valid ? "Str " + str.tostring(math.round(resistanceZone.strength)) + " | Act " + str.tostring(math.round(resistanceZone.actionability)) + " | Dist " + str.tostring(f_zoneDistanceAtr(resistanceZone, normalizationAtr), "#.##") + "A" : "n/a"
+    string rReaction = resistanceZone.valid ? "Rx " + (na(resistanceZone.reactionQuality) ? "n/a" : str.tostring(math.round(resistanceZone.reactionQuality))) + " | Mean " + str.tostring(math.round(resistanceZone.weightedMean)) + " | Div " + str.tostring(resistanceZone.diversityCount) : "n/a"
+    string sMetrics = supportZone.valid ? "Str " + str.tostring(math.round(supportZone.strength)) + " | Act " + str.tostring(math.round(supportZone.actionability)) + " | Dist " + str.tostring(f_zoneDistanceAtr(supportZone, normalizationAtr), "#.##") + "A" : "n/a"
+    string sReaction = supportZone.valid ? "Rx " + (na(supportZone.reactionQuality) ? "n/a" : str.tostring(math.round(supportZone.reactionQuality))) + " | Mean " + str.tostring(math.round(supportZone.weightedMean)) + " | Div " + str.tostring(supportZone.diversityCount) : "n/a"
+    table.cell(debugDashboard, 0, 0, "R SCORE", text_color = resistanceColor, text_size = size.tiny)
+    table.cell(debugDashboard, 1, 0, rMetrics, text_color = #F8FAFC, text_size = size.tiny)
+    table.cell(debugDashboard, 0, 1, "R REACTION", text_color = resistanceColor, text_size = size.tiny)
+    table.cell(debugDashboard, 1, 1, rReaction, text_color = #F8FAFC, text_size = size.tiny)
+    table.cell(debugDashboard, 0, 2, "R SOURCES", text_color = resistanceColor, text_size = size.tiny)
+    table.cell(debugDashboard, 1, 2, resistanceZone.valid ? resistanceZone.sources : "n/a", text_color = #F8FAFC, text_size = size.tiny)
+    table.cell(debugDashboard, 0, 3, "S SCORE", text_color = supportColor, text_size = size.tiny)
+    table.cell(debugDashboard, 1, 3, sMetrics, text_color = #F8FAFC, text_size = size.tiny)
+    table.cell(debugDashboard, 0, 4, "S REACTION", text_color = supportColor, text_size = size.tiny)
+    table.cell(debugDashboard, 1, 4, sReaction, text_color = #F8FAFC, text_size = size.tiny)
+    table.cell(debugDashboard, 0, 5, "S SOURCES", text_color = supportColor, text_size = size.tiny)
+    table.cell(debugDashboard, 1, 5, supportZone.valid ? supportZone.sources : "n/a", text_color = #F8FAFC, text_size = size.tiny)
 
-bool vwapReclaim = enableAlerts and inRth and rawVwapReclaim
-bool vwapLoss = enableAlerts and inRth and rawVwapLoss
+float nearestZoneState = na
+if supportZone.valid and resistanceZone.valid
+    nearestZoneState := math.abs(close - supportZone.center) <= math.abs(resistanceZone.center - close) ? supportZone.state : -resistanceZone.state
+else if supportZone.valid
+    nearestZoneState := supportZone.state
+else if resistanceZone.valid
+    nearestZoneState := -resistanceZone.state
 
-bool bullishVwapRejectionAlert = enableAlerts and enableVwapRejectionAlerts and bullishVwapRejection
-bool bearishVwapRejectionAlert = enableAlerts and enableVwapRejectionAlerts and bearishVwapRejection
+plot(supportZone.valid ? supportZone.low : na, "Support Zone Low", display = showResearchValues ? display.data_window : display.none)
+plot(supportZone.valid ? supportZone.high : na, "Support Zone High", display = showResearchValues ? display.data_window : display.none)
+plot(supportZone.valid ? supportZone.strength : na, "Support Zone Strength", display = showResearchValues ? display.data_window : display.none)
+plot(resistanceZone.valid ? resistanceZone.low : na, "Resistance Zone Low", display = showResearchValues ? display.data_window : display.none)
+plot(resistanceZone.valid ? resistanceZone.high : na, "Resistance Zone High", display = showResearchValues ? display.data_window : display.none)
+plot(resistanceZone.valid ? resistanceZone.strength : na, "Resistance Zone Strength", display = showResearchValues ? display.data_window : display.none)
+plot(nearestZoneState, "Zone State", display = showResearchValues ? display.data_window : display.none)
+plot(supportZone.valid ? supportZone.actionability : na, "Support Zone Actionability", display = showResearchValues ? display.data_window : display.none)
+plot(resistanceZone.valid ? resistanceZone.actionability : na, "Resistance Zone Actionability", display = showResearchValues ? display.data_window : display.none)
+plot(gapActive and not gapFilled ? gapHigh : na, "Gap High", display = display.none)
+plot(gapActive and not gapFilled ? gapLow : na, "Gap Low", display = display.none)
+plot(gapActive and not gapFilled ? gapMid : na, "Gap Mid", display = display.none)
+plot(gapActive and not gapFilled ? gapUnfilledBoundary : na, "Gap Unfilled Boundary", display = display.none)
 
-alertcondition(pdhBreak, "PDH Break", "{{ticker}} closed above the previous-day high at {{close}}.")
-alertcondition(pdlBreak, "PDL Break", "{{ticker}} closed below the previous-day low at {{close}}.")
-
-alertcondition(pmhBreak, "Premarket High Break", "{{ticker}} closed above the premarket high at {{close}}.")
-alertcondition(pmlBreak, "Premarket Low Break", "{{ticker}} closed below the premarket low at {{close}}.")
-
-alertcondition(pwhBreak, "Previous-Week High Break", "{{ticker}} closed above the previous-week high at {{close}}.")
-alertcondition(pwlBreak, "Previous-Week Low Break", "{{ticker}} closed below the previous-week low at {{close}}.")
-
-alertcondition(orhBreak, "Opening-Range Breakout", "{{ticker}} closed above the opening-range high at {{close}}.")
-alertcondition(orlBreak, "Opening-Range Breakdown", "{{ticker}} closed below the opening-range low at {{close}}.")
-
-alertcondition(vwapReclaim, "VWAP Reclaim", "{{ticker}} reclaimed regular-session VWAP at {{close}}.")
-alertcondition(vwapLoss, "VWAP Loss", "{{ticker}} lost regular-session VWAP at {{close}}.")
-
-alertcondition(bullishVwapRejectionAlert, "Bullish VWAP Rejection", "{{ticker}} tested VWAP and closed back above it at {{close}}.")
-alertcondition(bearishVwapRejectionAlert, "Bearish VWAP Rejection", "{{ticker}} tested VWAP and closed back below it at {{close}}.")
+alertcondition(enableAlerts and barstate.isconfirmed and enteredResistance, "Entered Resistance Zone", "{{ticker}} entered the active Meridian resistance reaction zone at {{close}}.")
+alertcondition(enableAlerts and barstate.isconfirmed and enteredSupport, "Entered Support Zone", "{{ticker}} entered the active Meridian support reaction zone at {{close}}.")
+alertcondition(enableAlerts and barstate.isconfirmed and resistanceRejection, "Resistance Rejection", "{{ticker}} rejected the active Meridian resistance reaction zone at {{close}}.")
+alertcondition(enableAlerts and barstate.isconfirmed and supportRejection, "Support Rejection", "{{ticker}} rejected the active Meridian support reaction zone at {{close}}.")
+alertcondition(enableAlerts and barstate.isconfirmed and resistanceBreakAcceptance, "Resistance Break / Acceptance", "{{ticker}} is accepting through or has broken the active Meridian resistance zone at {{close}}.")
+alertcondition(enableAlerts and barstate.isconfirmed and supportBreakAcceptance, "Support Break / Acceptance", "{{ticker}} is accepting through or has broken the active Meridian support zone at {{close}}.")
+alertcondition(enableAlerts and barstate.isconfirmed and zoneFlip, "Zone Flip", "{{ticker}} confirmed a Meridian reaction-zone flip at {{close}}.")
+alertcondition(enableAlerts and barstate.isconfirmed and higherQualityZoneSelected, "New Higher-Quality Zone Selected", "{{ticker}} selected a materially stronger Meridian reaction zone at {{close}}.")
