@@ -2,6 +2,29 @@
 
 All notable repository and public-script changes are recorded here.
 
+## [0.1.2] — 2026-08-11
+
+### Options Context 0.2.1
+
+- Rebuilt Options Context from the v0.1 binary `-5…+5` voting model into separate continuous `Context Direction` (`-100…+100`) and `Context Confidence` (`0…100`) outputs.
+- Added independently inspectable Trend, Structure, Momentum, Participation, Persistence and Volatility components so directional context remains explainable rather than collapsing all evidence into opaque signals.
+- Reworked Trend around ATR-normalized EMA spread and fast/slow EMA slope instead of a simple bullish/bearish EMA vote.
+- Reworked Structure around continuous displacement from RTH VWAP, the finalized Opening Range and the RTH open while leaving objective support/resistance ownership to Options Levels.
+- Reworked Momentum around ATR-normalized multi-bar returns, centered RSI and momentum change instead of fixed RSI threshold votes.
+- Preserved same-time TradingView RVOL baselines while adding directional participation from close location and normalized one-bar return, with separate bar and cumulative RVOL intensity.
+- Added session persistence scoring from VWAP location, EMA alignment and bar direction across a configurable RTH lookback.
+- Added a non-directional volatility regime score based on short/long ATR behavior and rolling volatility z-score; volatility influences confidence rather than bullish/bearish direction.
+- Added confirmed 1H, 4H, 1D and 1W higher-timeframe trend states using regular-session data and completed higher-timeframe bars.
+- Deepened each HTF score with EMA structure, per-bar EMA slope, recent ATR-normalized path return, path efficiency, persistence and RSI rather than relying primarily on a moving-average snapshot.
+- Added independent HTF quality measurement, weighted HTF Composite, Tactical (`1H + 4H`) and Macro (`1D + 1W`) research scores.
+- Replaced the potentially misleading `100% ALIGN` presentation with magnitude-aware `HTF Conviction` and explicit breadth such as `4/4 BULL`, `3/4 BEAR` or `MIXED`.
+- Added magnitude-aware directional agreement so weak same-sign components no longer produce artificially perfect confidence.
+- Added `Levels Bias` states (`PREFER SUPPORT`, `SUPPORT LEAN`, `TWO-SIDED`, `RESISTANCE LEAN`, `PREFER RESISTANCE`, `LOW CONVICTION`) as the companion contract with Options Levels.
+- Added regime hysteresis to reduce rapid label changes around context thresholds.
+- Reoriented alerts toward confirmed context transitions, high-confidence directional states, aligned RVOL surges and recent strong-regime failures instead of duplicating price-level alerts owned by Options Levels.
+- Added detailed and compact dashboard modes plus research-only Data Window outputs for component scores, agreement/coherence, HTF quality, HTF tactical/macro state, Zone Preference and the legacy v0.1 comparison score.
+- Restricted the indicator to intraday chart timeframes below 60 minutes and preserved confirmed/non-lookahead higher-timeframe behavior.
+
 ## [0.1.1] — 2026-08-08
 
 ### Options Levels 0.2.1

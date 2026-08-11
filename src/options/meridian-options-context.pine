@@ -1,257 +1,177 @@
 //@version=6
 // SPDX-License-Identifier: MPL-2.0
-// Meridian — Options Context · v0.1.1
+// Meridian — Options Context · v0.2.1
 
 indicator(
-     title = "Meridian — Options Context",
+     title = "Meridian - Options Context",
      shorttitle = "Meridian Options Context",
      overlay = false,
      format = format.price,
-     precision = 1
+     precision = 1,
+     max_bars_back = 1000
 )
 
 import TradingView/ta/12 as tvta
 
 string GROUP_SESSION = "01. Session"
-string GROUP_RSI     = "02. RSI"
-string GROUP_RVOL    = "03. Relative Volume"
-string GROUP_CONTEXT = "04. Context Engine"
-string GROUP_VISUALS = "05. Visuals"
-string GROUP_TABLE   = "06. Dashboard"
-string GROUP_ALERTS  = "07. Alerts"
-string GROUP_COLORS  = "08. Colors"
+string GROUP_NORMALIZATION = "02. Normalization"
+string GROUP_TREND = "03. Trend"
+string GROUP_STRUCTURE = "04. Structure"
+string GROUP_MOMENTUM = "05. Momentum"
+string GROUP_PARTICIPATION = "06. Participation"
+string GROUP_PERSISTENCE = "07. Persistence"
+string GROUP_VOLATILITY = "08. Volatility"
+string GROUP_HTF = "09. Higher Timeframes"
+string GROUP_VISUALS = "10. Visuals"
+string GROUP_DASHBOARD = "11. Dashboard"
+string GROUP_ALERTS = "12. Alerts"
+string GROUP_COLORS = "13. Colors"
+string GROUP_RESEARCH = "14. Research / Debug"
 
-string sessionTimezone = input.string(
-     "America/New_York",
-     "Session timezone",
-     group = GROUP_SESSION
-)
+string sessionTimezone = input.string("America/New_York", "Session timezone", group = GROUP_SESSION)
+string rthInput = input.session("0930-1600", "Regular session", group = GROUP_SESSION)
+bool weekdaysOnly = input.bool(true, "Monday-Friday only", group = GROUP_SESSION)
+int openingRangeMinutes = input.int(15, "Opening-range minutes", minval = 1, maxval = 120, group = GROUP_SESSION)
 
-string rthInput = input.session(
-     "0930-1600",
-     "Regular session",
-     group = GROUP_SESSION
-)
+int atrLength = input.int(14, "ATR length", minval = 5, maxval = 100, group = GROUP_NORMALIZATION)
 
-bool weekdaysOnly = input.bool(
-     true,
-     "Monday-Friday only",
-     group = GROUP_SESSION
-)
+int fastEmaLength = input.int(9, "Fast EMA", minval = 1, maxval = 100, group = GROUP_TREND)
+int slowEmaLength = input.int(21, "Slow EMA", minval = 2, maxval = 200, group = GROUP_TREND)
+int trendSlopeLookback = input.int(5, "Slope lookback", minval = 1, maxval = 30, group = GROUP_TREND)
+float trendSpreadScale = input.float(0.25, "EMA spread scale (ATR)", minval = 0.05, maxval = 2.0, step = 0.05, group = GROUP_TREND)
+float trendSlopeScale = input.float(0.20, "EMA slope scale (ATR)", minval = 0.05, maxval = 2.0, step = 0.05, group = GROUP_TREND)
 
-int openingRangeMinutes = input.int(
-     15,
-     "Opening-range minutes",
-     minval = 1,
-     maxval = 120,
-     group = GROUP_SESSION
-)
+float vwapSource = input.source(hlc3, "RTH VWAP source", group = GROUP_STRUCTURE)
+float vwapDistanceScale = input.float(0.35, "VWAP displacement scale (ATR)", minval = 0.05, maxval = 2.0, step = 0.05, group = GROUP_STRUCTURE)
+float openingRangeBreakScale = input.float(0.25, "Opening-range break scale (ATR)", minval = 0.05, maxval = 2.0, step = 0.05, group = GROUP_STRUCTURE)
+float sessionOpenScale = input.float(0.50, "RTH-open displacement scale (ATR)", minval = 0.05, maxval = 3.0, step = 0.05, group = GROUP_STRUCTURE)
 
-string sessionDays = weekdaysOnly ? ":23456" : ":1234567"
-string rthSession = rthInput + sessionDays
+float rsiSource = input.source(close, "RSI source", group = GROUP_MOMENTUM)
+int rsiLength = input.int(14, "RSI length", minval = 2, maxval = 100, group = GROUP_MOMENTUM)
+int momentumLookback = input.int(5, "Normalized-return lookback", minval = 1, maxval = 30, group = GROUP_MOMENTUM)
+float momentumScale = input.float(1.0, "Normalized-return scale", minval = 0.10, maxval = 5.0, step = 0.10, group = GROUP_MOMENTUM)
+int momentumDeltaLookback = input.int(3, "Momentum-change lookback", minval = 1, maxval = 20, group = GROUP_MOMENTUM)
+float momentumDeltaScale = input.float(0.50, "Momentum-change scale", minval = 0.10, maxval = 2.0, step = 0.05, group = GROUP_MOMENTUM)
 
-bool inRth = not na(time(timeframe.period, rthSession, sessionTimezone))
+int rvolLookbackDays = input.int(20, "RVOL historical days", minval = 2, maxval = 100, group = GROUP_PARTICIPATION)
+bool adjustRealtimeRvol = input.bool(true, "Estimate unclosed real-time bar", group = GROUP_PARTICIPATION)
+float participationReturnScale = input.float(0.50, "Directional-return scale (ATR)", minval = 0.10, maxval = 3.0, step = 0.10, group = GROUP_PARTICIPATION)
+float rvolLogScale = input.float(0.70, "RVOL intensity scale", minval = 0.10, maxval = 3.0, step = 0.05, group = GROUP_PARTICIPATION)
+float highRvolThreshold = input.float(1.5, "High RVOL threshold", minval = 1.0, maxval = 10.0, step = 0.1, group = GROUP_PARTICIPATION)
+float extremeRvolThreshold = input.float(2.0, "Extreme RVOL threshold", minval = 1.0, maxval = 20.0, step = 0.1, group = GROUP_PARTICIPATION)
+float rvolDisplayCap = input.float(3.0, "RVOL display cap", minval = 1.0, maxval = 20.0, step = 0.25, group = GROUP_PARTICIPATION)
 
-int calendarDayKey =
-     year(time, sessionTimezone) * 10000 +
-     month(time, sessionTimezone) * 100 +
-     dayofmonth(time, sessionTimezone)
+int persistenceLength = input.int(12, "Persistence bars", minval = 3, maxval = 60, group = GROUP_PERSISTENCE)
 
-bool newCalendarDay = na(calendarDayKey[1]) or calendarDayKey != calendarDayKey[1]
+int volatilityShortLength = input.int(14, "Short ATR length", minval = 5, maxval = 50, group = GROUP_VOLATILITY)
+int volatilityLongLength = input.int(50, "Long ATR length", minval = 20, maxval = 200, group = GROUP_VOLATILITY)
+int volatilityZLookback = input.int(100, "Volatility history", minval = 30, maxval = 500, group = GROUP_VOLATILITY)
+float volatilityZScale = input.float(1.5, "Volatility z-score scale", minval = 0.25, maxval = 5.0, step = 0.25, group = GROUP_VOLATILITY)
 
-bool rthStart =
-     inRth and (
-         session.isfirstbar_regular or
-         newCalendarDay or
-         not inRth[1]
-     )
+bool includeHigherTimeframes = input.bool(true, "Include HTF trend in Context", group = GROUP_HTF)
+bool showHigherTimeframeMatrix = input.bool(true, "Show 1H / 4H / 1D / 1W states", group = GROUP_HTF)
+int htfFastEmaLength = input.int(20, "HTF fast EMA", minval = 2, maxval = 100, group = GROUP_HTF)
+int htfSlowEmaLength = input.int(50, "HTF slow EMA", minval = 5, maxval = 300, group = GROUP_HTF)
+int htfAtrLength = input.int(14, "HTF ATR length", minval = 5, maxval = 100, group = GROUP_HTF)
+int htfSlopeLookback = input.int(3, "HTF EMA slope bars", minval = 1, maxval = 20, group = GROUP_HTF)
+int htfPathLookback = input.int(5, "HTF recent-path bars", minval = 2, maxval = 20, group = GROUP_HTF)
+int htfPersistenceLength = input.int(6, "HTF persistence bars", minval = 3, maxval = 20, group = GROUP_HTF)
+float htfSpreadScale = input.float(0.30, "HTF EMA spread scale (ATR)", minval = 0.05, maxval = 3.0, step = 0.05, group = GROUP_HTF)
+float htfSlopeScale = input.float(0.12, "HTF EMA slope scale (ATR/bar)", minval = 0.02, maxval = 1.0, step = 0.01, group = GROUP_HTF)
+float htfReturnScale = input.float(0.85, "HTF path-return scale", minval = 0.10, maxval = 3.0, step = 0.05, group = GROUP_HTF)
+float htfDirectionalThreshold = input.float(20.0, "HTF directional threshold", minval = 5.0, maxval = 50.0, step = 5.0, group = GROUP_HTF)
 
-if barstate.isfirst and not timeframe.isintraday
-    runtime.error("Meridian Options Context is designed for intraday charts.")
+bool showContextLine = input.bool(true, "Show Context Direction", group = GROUP_VISUALS)
+bool showConfidenceLine = input.bool(true, "Show Context Confidence", group = GROUP_VISUALS)
+bool showRvol = input.bool(true, "Show RVOL columns", group = GROUP_VISUALS)
+bool showRsiMomentum = input.bool(false, "Show RSI momentum score", group = GROUP_VISUALS)
+bool showHtfComposite = input.bool(false, "Show HTF composite", group = GROUP_VISUALS)
+bool showRegimeBackground = input.bool(true, "Subtle regime background", group = GROUP_VISUALS)
+int regimeBackgroundTransparency = input.int(96, "Regime background transparency", minval = 85, maxval = 100, group = GROUP_VISUALS)
 
-bool showRsi = input.bool(true, "Show RSI", group = GROUP_RSI)
-float rsiSource = input.source(close, "RSI source", group = GROUP_RSI)
-int rsiLength = input.int(14, "RSI length", minval = 2, group = GROUP_RSI)
-
-float rsiBullThreshold = input.float(
-     55.0,
-     "Bullish momentum threshold",
-     minval = 50.0,
-     maxval = 100.0,
-     step = 0.5,
-     group = GROUP_RSI
-)
-
-float rsiBearThreshold = input.float(
-     45.0,
-     "Bearish momentum threshold",
-     minval = 0.0,
-     maxval = 50.0,
-     step = 0.5,
-     group = GROUP_RSI
-)
-
-bool showTraditionalRsiLevels = input.bool(
-     false,
-     "Show 70 / 30 levels",
-     group = GROUP_RSI
-)
-
-bool showRvol = input.bool(true, "Show normalized RVOL columns", group = GROUP_RVOL)
-
-int rvolLookbackDays = input.int(
-     20,
-     "RVOL historical days",
-     minval = 2,
-     maxval = 100,
-     group = GROUP_RVOL
-)
-
-bool adjustRealtimeRvol = input.bool(
-     true,
-     "Estimate unclosed real-time bar",
-     group = GROUP_RVOL
-)
-
-float normalRvolThreshold = input.float(
-     1.0,
-     "Normal participation",
-     minval = 0.1,
-     step = 0.1,
-     group = GROUP_RVOL
-)
-
-float highRvolThreshold = input.float(
-     1.5,
-     "High participation",
-     minval = 0.1,
-     step = 0.1,
-     group = GROUP_RVOL
-)
-
-float extremeRvolThreshold = input.float(
-     2.0,
-     "Extreme participation",
-     minval = 0.1,
-     step = 0.1,
-     group = GROUP_RVOL
-)
-
-float rvolDisplayCap = input.float(
-     3.0,
-     "RVOL display cap",
-     minval = 1.0,
-     step = 0.25,
-     group = GROUP_RVOL,
-     tooltip = "RVOL columns are normalized to a 0-100 pane. The table always shows the uncapped ratio."
-)
-
-bool showRvolBaseline = input.bool(
-     true,
-     "Show 1.0x RVOL guide",
-     group = GROUP_RVOL
-)
-
-float vwapSource = input.source(hlc3, "Daily VWAP source", group = GROUP_CONTEXT)
-
-int fastEmaLength = input.int(
-     9,
-     "Fast EMA",
-     minval = 1,
-     group = GROUP_CONTEXT
-)
-
-int slowEmaLength = input.int(
-     21,
-     "Slow EMA",
-     minval = 2,
-     group = GROUP_CONTEXT
-)
-
-bool includeOpeningRangeInScore = input.bool(
-     true,
-     "Include opening range in score",
-     group = GROUP_CONTEXT
-)
-
-bool includeParticipationInScore = input.bool(
-     true,
-     "Include directional RVOL in score",
-     group = GROUP_CONTEXT
-)
-
-bool showRsiZone = input.bool(true, "Shade RSI 40-60 zone", group = GROUP_VISUALS)
-
-bool showRegimeBackground = input.bool(
-     true,
-     "Subtle regime background",
-     group = GROUP_VISUALS
-)
-
-int regimeBackgroundTransparency = input.int(
-     96,
-     "Regime background transparency",
-     minval = 85,
-     maxval = 100,
-     group = GROUP_VISUALS
-)
-
-bool showDashboard = input.bool(true, "Show dashboard", group = GROUP_TABLE)
-
-string dashboardPositionInput = input.string(
-     "Top Right",
-     "Dashboard position",
-     options = ["Top Right", "Top Left", "Bottom Right", "Bottom Left"],
-     group = GROUP_TABLE
-)
-
-string dashboardSizeInput = input.string(
-     "Tiny",
-     "Dashboard text size",
-     options = ["Tiny", "Small", "Normal"],
-     group = GROUP_TABLE
-)
-
-bool showDashboardVolumeValues = input.bool(
-     false,
-     "Show raw volume values",
-     group = GROUP_TABLE
-)
+bool showDashboard = input.bool(true, "Show dashboard", group = GROUP_DASHBOARD)
+string dashboardMode = input.string("Detailed", "Dashboard mode", options = ["Detailed", "Compact"], group = GROUP_DASHBOARD)
+string dashboardPositionInput = input.string("Top Right", "Dashboard position", options = ["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group = GROUP_DASHBOARD)
+string dashboardSizeInput = input.string("Small", "Dashboard text size", options = ["Tiny", "Small", "Normal"], group = GROUP_DASHBOARD)
 
 bool enableAlerts = input.bool(true, "Enable alert conditions", group = GROUP_ALERTS)
-
-bool alertStrongRegime = input.bool(
-     true,
-     "Strong bullish / bearish regime",
-     group = GROUP_ALERTS
-)
-
-bool alertHighRvol = input.bool(
-     true,
-     "High RVOL threshold cross",
-     group = GROUP_ALERTS
-)
-
-bool alertVwapCross = input.bool(
-     true,
-     "VWAP reclaim / loss",
-     group = GROUP_ALERTS
-)
-
-bool alertOpeningRangeWithVolume = input.bool(
-     true,
-     "Opening-range break with high RVOL",
-     group = GROUP_ALERTS
-)
+float highConfidenceDirectionThreshold = input.float(55.0, "High-confidence direction threshold", minval = 20.0, maxval = 100.0, step = 5.0, group = GROUP_ALERTS)
+float highConfidenceThreshold = input.float(60.0, "High-confidence confidence threshold", minval = 20.0, maxval = 100.0, step = 5.0, group = GROUP_ALERTS)
+int contextFailureWindow = input.int(12, "Strong-regime failure window (bars)", minval = 2, maxval = 50, group = GROUP_ALERTS)
 
 color neonPurple = input.color(#D946EF, "Neon purple", group = GROUP_COLORS)
-color lightPurple = input.color(#C4B5FD, "RSI line", group = GROUP_COLORS)
+color lightPurple = input.color(#C4B5FD, "Confidence / secondary", group = GROUP_COLORS)
 color bullishColor = input.color(#22D3EE, "Bullish", group = GROUP_COLORS)
 color bearishColor = input.color(#FB7185, "Bearish", group = GROUP_COLORS)
 color strongBullColor = input.color(#39FF88, "Strong bullish", group = GROUP_COLORS)
 color strongBearColor = input.color(#FF4D6D, "Strong bearish", group = GROUP_COLORS)
 color neutralColor = input.color(#A1A1AA, "Neutral", group = GROUP_COLORS)
 color panelColor = input.color(#111118, "Dashboard background", group = GROUP_COLORS)
+
+bool showResearchValues = input.bool(false, "Show research values in Data Window", group = GROUP_RESEARCH)
+bool showLegacyComparison = input.bool(false, "Show v0.1 binary-score comparison", group = GROUP_RESEARCH)
+
+int REGIME_STRONG_BEAR = -3
+int REGIME_BEAR = -2
+int REGIME_BEAR_LEAN = -1
+int REGIME_BALANCED = 0
+int REGIME_BULL_LEAN = 1
+int REGIME_BULL = 2
+int REGIME_STRONG_BULL = 3
+
+f_clamp(float value, float lower, float upper) =>
+    math.max(lower, math.min(upper, value))
+
+f_sat(float value) =>
+    value / (1.0 + math.abs(value))
+
+f_bound(float value) =>
+    100.0 * f_sat(value)
+
+f_sign(float value) =>
+    value > 0.0 ? 1.0 : value < 0.0 ? -1.0 : 0.0
+
+f_weighted2(float v1, float w1, float v2, float w2) =>
+    float numerator = 0.0
+    float denominator = 0.0
+    if not na(v1)
+        numerator := numerator + v1 * w1
+        denominator := denominator + w1
+    if not na(v2)
+        numerator := numerator + v2 * w2
+        denominator := denominator + w2
+    denominator > 0.0 ? numerator / denominator : na
+
+f_weighted3(float v1, float w1, float v2, float w2, float v3, float w3) =>
+    float numerator = 0.0
+    float denominator = 0.0
+    if not na(v1)
+        numerator := numerator + v1 * w1
+        denominator := denominator + w1
+    if not na(v2)
+        numerator := numerator + v2 * w2
+        denominator := denominator + w2
+    if not na(v3)
+        numerator := numerator + v3 * w3
+        denominator := denominator + w3
+    denominator > 0.0 ? numerator / denominator : na
+
+f_weighted4(float v1, float w1, float v2, float w2, float v3, float w3, float v4, float w4) =>
+    float numerator = 0.0
+    float denominator = 0.0
+    if not na(v1)
+        numerator := numerator + v1 * w1
+        denominator := denominator + w1
+    if not na(v2)
+        numerator := numerator + v2 * w2
+        denominator := denominator + w2
+    if not na(v3)
+        numerator := numerator + v3 * w3
+        denominator := denominator + w3
+    if not na(v4)
+        numerator := numerator + v4 * w4
+        denominator := denominator + w4
+    denominator > 0.0 ? numerator / denominator : na
 
 f_dashboardPosition(string positionText) =>
     positionText == "Top Left" ? position.top_left :
@@ -260,72 +180,80 @@ f_dashboardPosition(string positionText) =>
      position.top_right
 
 f_textSize(string sizeText) =>
-    sizeText == "Normal" ? size.normal :
-     sizeText == "Small" ? size.small :
-     size.tiny
+    sizeText == "Normal" ? size.normal : sizeText == "Small" ? size.small : size.tiny
 
-f_formatRatio(float value) =>
+f_scoreText(float value) =>
+    na(value) ? "n/a" : value > 0.0 ? "+" + str.tostring(math.round(value)) : str.tostring(math.round(value))
+
+f_ratioText(float value) =>
     na(value) ? "n/a" : str.tostring(value, "#.00") + "x"
 
-f_scoreText(int value) =>
-    value > 0 ? "+" + str.tostring(value) : str.tostring(value)
+f_confidenceText(float value) =>
+    na(value) ? "n/a" : value > 65.0 ? "HIGH" : value >= 35.0 ? "MOD" : "LOW"
 
-f_formatVolume(float value) =>
-    na(value) ? "n/a" :
-     value >= 1000000000 ? str.tostring(value / 1000000000, "#.00") + "B" :
-     value >= 1000000 ? str.tostring(value / 1000000, "#.00") + "M" :
-     value >= 1000 ? str.tostring(value / 1000, "#.0") + "K" :
-     str.tostring(value, "#")
+f_volatilityText(float value) =>
+    na(value) ? "n/a" : value >= 80.0 ? "EXTREME" : value >= 60.0 ? "EXPANDED" : value >= 40.0 ? "NORMAL" : value >= 20.0 ? "QUIET" : "CONTRACTED"
 
-f_regimeText(int score) =>
-    score >= 4 ? "Strong Bull" :
-     score >= 2 ? "Bullish" :
-     score <= -4 ? "Strong Bear" :
-     score <= -2 ? "Bearish" :
-     "Mixed"
+f_rawRegime(float score) =>
+    score >= 75.0 ? REGIME_STRONG_BULL :
+     score >= 45.0 ? REGIME_BULL :
+     score >= 20.0 ? REGIME_BULL_LEAN :
+     score <= -75.0 ? REGIME_STRONG_BEAR :
+     score <= -45.0 ? REGIME_BEAR :
+     score <= -20.0 ? REGIME_BEAR_LEAN :
+     REGIME_BALANCED
 
-f_regimeColor(int score) =>
-    score >= 4 ? strongBullColor :
-     score >= 2 ? bullishColor :
-     score <= -4 ? strongBearColor :
-     score <= -2 ? bearishColor :
+f_updateRegime(int previousState, float score) =>
+    int rawState = f_rawRegime(score)
+    int nextState = previousState
+    if previousState == REGIME_STRONG_BULL
+        nextState := score >= 68.0 ? REGIME_STRONG_BULL : rawState
+    else if previousState == REGIME_BULL
+        nextState := score >= 75.0 ? REGIME_STRONG_BULL : score >= 38.0 ? REGIME_BULL : rawState
+    else if previousState == REGIME_BULL_LEAN
+        nextState := score >= 45.0 ? rawState : score >= 14.0 ? REGIME_BULL_LEAN : rawState
+    else if previousState == REGIME_STRONG_BEAR
+        nextState := score <= -68.0 ? REGIME_STRONG_BEAR : rawState
+    else if previousState == REGIME_BEAR
+        nextState := score <= -75.0 ? REGIME_STRONG_BEAR : score <= -38.0 ? REGIME_BEAR : rawState
+    else if previousState == REGIME_BEAR_LEAN
+        nextState := score <= -45.0 ? rawState : score <= -14.0 ? REGIME_BEAR_LEAN : rawState
+    else
+        nextState := rawState
+    nextState
+
+f_regimeText(int state) =>
+    state == REGIME_STRONG_BULL ? "STRONG BULL" :
+     state == REGIME_BULL ? "BULL" :
+     state == REGIME_BULL_LEAN ? "BULL LEAN" :
+     state == REGIME_STRONG_BEAR ? "STRONG BEAR" :
+     state == REGIME_BEAR ? "BEAR" :
+     state == REGIME_BEAR_LEAN ? "BEAR LEAN" :
+     "BALANCED"
+
+f_componentText(float score) =>
+    na(score) ? "n/a" : score >= 75.0 ? "STRONG BULL" : score >= 45.0 ? "BULL" : score >= 20.0 ? "BULL LEAN" : score <= -75.0 ? "STRONG BEAR" : score <= -45.0 ? "BEAR" : score <= -20.0 ? "BEAR LEAN" : "BALANCED"
+
+f_regimeColor(int state) =>
+    state == REGIME_STRONG_BULL ? strongBullColor :
+     state == REGIME_BULL or state == REGIME_BULL_LEAN ? bullishColor :
+     state == REGIME_STRONG_BEAR ? strongBearColor :
+     state == REGIME_BEAR or state == REGIME_BEAR_LEAN ? bearishColor :
      neutralColor
 
-f_rsiState(float value) =>
-    na(value) ? "n/a" :
-     value >= rsiBullThreshold ? "Bull" :
-     value <= rsiBearThreshold ? "Bear" :
-     "Neutral"
-
-f_rsiColor(float value) =>
-    na(value) ? neutralColor :
-     value >= rsiBullThreshold ? bullishColor :
-     value <= rsiBearThreshold ? bearishColor :
-     lightPurple
+f_scoreColor(float score) =>
+    na(score) ? neutralColor : score >= 75.0 ? strongBullColor : score >= 20.0 ? bullishColor : score <= -75.0 ? strongBearColor : score <= -20.0 ? bearishColor : neutralColor
 
 f_rvolState(float value) =>
-    na(value) ? "n/a" :
-     value >= extremeRvolThreshold ? "Extreme" :
-     value >= highRvolThreshold ? "High" :
-     value >= normalRvolThreshold ? "Normal" :
-     "Low"
+    na(value) ? "n/a" : value >= extremeRvolThreshold ? "EXTREME" : value >= highRvolThreshold ? "HIGH" : value >= 1.0 ? "NORMAL" : "LOW"
 
-f_rvolColor(float value, bool bullishBar) =>
-    na(value) ? color.new(neutralColor, 75) :
-     value >= extremeRvolThreshold ? color.new(neonPurple, 10) :
-     value >= highRvolThreshold ? color.new(bullishBar ? bullishColor : bearishColor, 15) :
-     value >= normalRvolThreshold ? color.new(bullishBar ? bullishColor : bearishColor, 48) :
-     color.new(neutralColor, 78)
+f_levelsBias(float direction, float confidence) =>
+    na(direction) or na(confidence) ? "n/a" : confidence < 35.0 ? "LOW CONVICTION" : direction >= 45.0 ? "PREFER SUPPORT" : direction <= -45.0 ? "PREFER RESISTANCE" : direction >= 20.0 ? "SUPPORT LEAN" : direction <= -20.0 ? "RESISTANCE LEAN" : "TWO-SIDED"
 
-f_tableCell(
-     table tableId,
-     int column,
-     int row,
-     string cellText,
-     color textColor,
-     color backgroundColor,
-     string horizontalAlignment
-) =>
+f_zonePreference(float direction, float confidence) =>
+    na(direction) or na(confidence) or confidence < 35.0 or math.abs(direction) < 20.0 ? 0.0 : direction > 0.0 ? 1.0 : -1.0
+
+f_tableCell(table tableId, int column, int row, string cellText, color textColor, color backgroundColor, string horizontalAlignment) =>
     table.cell(
          tableId,
          column,
@@ -337,6 +265,55 @@ f_tableCell(
          text_halign = horizontalAlignment == "Left" ? text.align_left : text.align_right
     )
 
+f_htfMetricsConfirmed() =>
+    float htfAtr = ta.atr(htfAtrLength)
+    float htfFast = ta.ema(close, htfFastEmaLength)
+    float htfSlow = ta.ema(close, htfSlowEmaLength)
+    float htfRsi = ta.rsi(close, rsiLength)
+    float atrSafeHtf = math.max(nz(htfAtr, syminfo.mintick), syminfo.mintick)
+    float spreadScoreRaw = f_bound(((htfFast - htfSlow) / atrSafeHtf) / htfSpreadScale)
+    float slowSlopePerBar = ((htfSlow - htfSlow[htfSlopeLookback]) / math.max(float(htfSlopeLookback), 1.0)) / atrSafeHtf
+    float fastSlopePerBar = ((htfFast - htfFast[htfSlopeLookback]) / math.max(float(htfSlopeLookback), 1.0)) / atrSafeHtf
+    float slowSlopeScore = f_bound(slowSlopePerBar / htfSlopeScale)
+    float fastSlopeScore = f_bound(fastSlopePerBar / htfSlopeScale)
+    float slopeScoreRaw = f_weighted2(slowSlopeScore, 0.65, fastSlopeScore, 0.35)
+    float pathMove = close - close[htfPathLookback]
+    float pathReturnAtr = pathMove / (atrSafeHtf * math.sqrt(float(htfPathLookback)))
+    float returnScoreRaw = f_bound(pathReturnAtr / htfReturnScale)
+    float pathLength = ta.sma(math.abs(ta.change(close)), htfPathLookback) * htfPathLookback
+    float efficiencyScoreRaw = not na(pathLength) and pathLength > syminfo.mintick ? f_clamp(100.0 * pathMove / pathLength, -100.0, 100.0) : na
+    float persistenceScoreRaw = 100.0 * ta.sma(f_sign(close - htfFast), htfPersistenceLength)
+    float rsiScoreRaw = f_bound((htfRsi - 50.0) / 20.0)
+    float directionRaw = 0.28 * spreadScoreRaw + 0.22 * slopeScoreRaw + 0.22 * returnScoreRaw + 0.13 * efficiencyScoreRaw + 0.10 * persistenceScoreRaw + 0.05 * rsiScoreRaw
+    float magnitudeRaw = 0.28 * math.abs(spreadScoreRaw) + 0.22 * math.abs(slopeScoreRaw) + 0.22 * math.abs(returnScoreRaw) + 0.13 * math.abs(efficiencyScoreRaw) + 0.10 * math.abs(persistenceScoreRaw) + 0.05 * math.abs(rsiScoreRaw)
+    float coherenceRaw = magnitudeRaw > 0.0 ? f_clamp(math.abs(directionRaw) / magnitudeRaw, 0.0, 1.0) : 0.0
+    float qualityRaw = f_clamp(magnitudeRaw * (0.60 + 0.40 * coherenceRaw), 0.0, 100.0)
+    [f_clamp(directionRaw[1], -100.0, 100.0), qualityRaw[1]]
+
+f_htfBreadthText(float score1, float score2, float score3, float score4, float threshold) =>
+    int bullCount = (not na(score1) and score1 >= threshold ? 1 : 0) + (not na(score2) and score2 >= threshold ? 1 : 0) + (not na(score3) and score3 >= threshold ? 1 : 0) + (not na(score4) and score4 >= threshold ? 1 : 0)
+    int bearCount = (not na(score1) and score1 <= -threshold ? 1 : 0) + (not na(score2) and score2 <= -threshold ? 1 : 0) + (not na(score3) and score3 <= -threshold ? 1 : 0) + (not na(score4) and score4 <= -threshold ? 1 : 0)
+    int availableCount = (not na(score1) ? 1 : 0) + (not na(score2) ? 1 : 0) + (not na(score3) ? 1 : 0) + (not na(score4) ? 1 : 0)
+    bullCount > bearCount ? str.tostring(bullCount) + "/" + str.tostring(availableCount) + " BULL" : bearCount > bullCount ? str.tostring(bearCount) + "/" + str.tostring(availableCount) + " BEAR" : availableCount > 0 ? "MIXED" : "n/a"
+
+string sessionDays = weekdaysOnly ? ":23456" : ":1234567"
+string rthSession = rthInput + sessionDays
+bool inRth = not na(time(timeframe.period, rthSession, sessionTimezone))
+int calendarDayKey = year(time, sessionTimezone) * 10000 + month(time, sessionTimezone) * 100 + dayofmonth(time, sessionTimezone)
+bool newCalendarDay = na(calendarDayKey[1]) or calendarDayKey != calendarDayKey[1]
+bool rthStart = inRth and (session.isfirstbar_regular or newCalendarDay or not inRth[1])
+
+if barstate.isfirst and (not timeframe.isintraday or timeframe.in_seconds() >= 3600)
+    runtime.error("Meridian Options Context v0.2 is designed for intraday charts below 60 minutes.")
+
+float atr = ta.atr(atrLength)
+float atrSafe = math.max(nz(atr, syminfo.mintick), syminfo.mintick)
+float atrPct = atrSafe / math.max(close, syminfo.mintick)
+
+var float currentSessionOpen = na
+if rthStart
+    currentSessionOpen := open
+
 bool dailyVwapAnchor = rthStart
 float sessionVwap = ta.vwap(vwapSource, dailyVwapAnchor)
 
@@ -344,236 +321,268 @@ var int openingRangeEndTime = na
 var float openingRangeHigh = na
 var float openingRangeLow = na
 var bool openingRangeFinalized = false
-
 if rthStart
     openingRangeEndTime := time + openingRangeMinutes * 60 * 1000
     openingRangeHigh := high
     openingRangeLow := low
     openingRangeFinalized := false
-
-bool inOpeningRange =
-     inRth and
-     not na(openingRangeEndTime) and
-     time < openingRangeEndTime
-
+bool inOpeningRange = inRth and not na(openingRangeEndTime) and time < openingRangeEndTime
 if inOpeningRange and not rthStart
     openingRangeHigh := math.max(openingRangeHigh, high)
     openingRangeLow := math.min(openingRangeLow, low)
-
 if inRth and not inOpeningRange and not openingRangeFinalized and not na(openingRangeEndTime)
     openingRangeFinalized := true
+bool openingRangeTimeframeWarning = timeframe.in_seconds() > openingRangeMinutes * 60
 
-bool openingRangeTimeframeWarning =
-     timeframe.in_seconds() > openingRangeMinutes * 60
-
-float rsiValue = ta.rsi(rsiSource, rsiLength)
 float fastEma = ta.ema(close, fastEmaLength)
 float slowEma = ta.ema(close, slowEmaLength)
+float spreadNorm = (fastEma - slowEma) / atrSafe
+float slowSlopeNorm = (slowEma - slowEma[trendSlopeLookback]) / atrSafe
+float fastSlopeNorm = (fastEma - fastEma[trendSlopeLookback]) / atrSafe
+float trendSpreadScore = f_bound(spreadNorm / trendSpreadScale)
+float trendSlowSlopeScore = f_bound(slowSlopeNorm / trendSlopeScale)
+float trendFastSlopeScore = f_bound(fastSlopeNorm / trendSlopeScale)
+float trendScore = f_clamp(0.55 * trendSpreadScore + 0.30 * trendSlowSlopeScore + 0.15 * trendFastSlopeScore, -100.0, 100.0)
 
-string regularSessionTicker = ticker.new(
-     syminfo.prefix,
-     syminfo.ticker,
-     session.regular
-)
+float vwapStructureScore = inRth and not na(sessionVwap) ? f_bound(((close - sessionVwap) / atrSafe) / vwapDistanceScale) : na
+float openingRangeScore = na
+if inRth and openingRangeFinalized and not openingRangeTimeframeWarning and not na(openingRangeHigh) and not na(openingRangeLow)
+    float openingRangeWidth = math.max(openingRangeHigh - openingRangeLow, syminfo.mintick)
+    if close > openingRangeHigh
+        openingRangeScore := 30.0 + 70.0 * f_sat(((close - openingRangeHigh) / atrSafe) / openingRangeBreakScale)
+    else if close < openingRangeLow
+        openingRangeScore := -30.0 - 70.0 * f_sat(((openingRangeLow - close) / atrSafe) / openingRangeBreakScale)
+    else
+        float position = 2.0 * (close - openingRangeLow) / openingRangeWidth - 1.0
+        openingRangeScore := 30.0 * f_clamp(position, -1.0, 1.0)
+float sessionOpenScore = inRth and not na(currentSessionOpen) ? f_bound(((close - currentSessionOpen) / atrSafe) / sessionOpenScale) : na
+float structureScore = f_weighted3(vwapStructureScore, 0.60, openingRangeScore, 0.30, sessionOpenScore, 0.10)
 
-[barVolumeRaw, barAverageRaw, barRvolRaw] = request.security(
+float rsiValue = ta.rsi(rsiSource, rsiLength)
+float rsiMomentumScore = not na(rsiValue) ? f_bound((rsiValue - 50.0) / 20.0) : na
+float momentumReturn = close[momentumLookback] > 0.0 ? math.log(close / close[momentumLookback]) : na
+float expectedMove = atrPct * math.sqrt(momentumLookback)
+float momentumReturnNorm = not na(momentumReturn) and expectedMove > 0.0 ? momentumReturn / expectedMove : na
+float returnMomentumScore = not na(momentumReturnNorm) ? f_bound(momentumReturnNorm / momentumScale) : na
+float momentumDeltaRaw = not na(returnMomentumScore) and not na(returnMomentumScore[momentumDeltaLookback]) ? (returnMomentumScore - returnMomentumScore[momentumDeltaLookback]) / 100.0 : na
+float momentumDeltaScore = not na(momentumDeltaRaw) ? f_bound(momentumDeltaRaw / momentumDeltaScale) : na
+float momentumScore = f_weighted3(returnMomentumScore, 0.55, rsiMomentumScore, 0.35, momentumDeltaScore, 0.10)
+
+string regularSessionTicker = ticker.new(syminfo.prefix, syminfo.ticker, session.regular)
+[_, _, barRvolRaw] = request.security(
      regularSessionTicker,
      timeframe.period,
-     tvta.relativeVolume(
-         rvolLookbackDays,
-         "D",
-         false,
-         adjustRealtimeRvol
-     ),
+     tvta.relativeVolume(rvolLookbackDays, "D", false, adjustRealtimeRvol),
      gaps = barmerge.gaps_on,
      lookahead = barmerge.lookahead_off
 )
-
-[cumulativeVolumeRaw, cumulativeAverageRaw, cumulativeRvolRaw] = request.security(
+[_, _, cumulativeRvolRaw] = request.security(
      regularSessionTicker,
      timeframe.period,
-     tvta.relativeVolume(
-         rvolLookbackDays,
-         "D",
-         true,
-         adjustRealtimeRvol
-     ),
+     tvta.relativeVolume(rvolLookbackDays, "D", true, adjustRealtimeRvol),
      gaps = barmerge.gaps_on,
      lookahead = barmerge.lookahead_off
 )
-
 float barRvol = inRth ? barRvolRaw : na
 float cumulativeRvol = inRth ? cumulativeRvolRaw : na
-float barVolume = inRth ? barVolumeRaw : na
-float cumulativeVolume = inRth ? cumulativeVolumeRaw : na
+float barRange = math.max(high - low, math.max(atrSafe * 0.02, syminfo.mintick))
+float closeLocationValue = f_clamp((2.0 * close - high - low) / barRange, -1.0, 1.0)
+float oneBarReturnNorm = close[1] > 0.0 ? math.log(close / close[1]) / atrPct : na
+float returnDirection = not na(oneBarReturnNorm) ? f_sat(oneBarReturnNorm / participationReturnScale) : 0.0
+float directionalProxy = f_clamp(0.65 * closeLocationValue + 0.35 * returnDirection, -1.0, 1.0)
+float barIntensity = not na(barRvol) and barRvol > 0.0 ? f_sat(math.max(math.log(barRvol), 0.0) / rvolLogScale) : na
+float cumulativeIntensity = not na(cumulativeRvol) and cumulativeRvol > 0.0 ? f_sat(math.max(math.log(cumulativeRvol), 0.0) / rvolLogScale) : na
+float participationIntensity = f_weighted2(barIntensity, 0.65, cumulativeIntensity, 0.35)
+float participationScore = not na(participationIntensity) ? 100.0 * directionalProxy * participationIntensity : na
+float participationQuality = not na(participationIntensity) ? 100.0 * participationIntensity : na
 
-int vwapScore =
-     not inRth or na(sessionVwap) ? 0 :
-     close > sessionVwap ? 1 :
-     close < sessionVwap ? -1 :
-     0
+var int rthBarCount = 0
+if rthStart
+    rthBarCount := 1
+else if inRth
+    rthBarCount := rthBarCount + 1
+else
+    rthBarCount := 0
+float persistenceDivisor = math.max(math.min(persistenceLength, rthBarCount), 1)
+float vwapPersistenceInput = inRth and not na(sessionVwap) ? f_sign(close - sessionVwap) : 0.0
+float emaPersistenceInput = inRth ? f_sign(fastEma - slowEma) : 0.0
+float returnPersistenceInput = inRth and close[1] > 0.0 ? f_sign(math.log(close / close[1])) : 0.0
+float vwapPersistenceAverage = ta.sma(vwapPersistenceInput, persistenceLength)
+float emaPersistenceAverage = ta.sma(emaPersistenceInput, persistenceLength)
+float returnPersistenceAverage = ta.sma(returnPersistenceInput, persistenceLength)
+float vwapPersistence = inRth ? vwapPersistenceAverage * persistenceLength / persistenceDivisor : na
+float emaPersistence = inRth ? emaPersistenceAverage * persistenceLength / persistenceDivisor : na
+float returnPersistence = inRth ? returnPersistenceAverage * persistenceLength / persistenceDivisor : na
+float persistenceScore = inRth ? 100.0 * f_weighted3(vwapPersistence, 0.40, emaPersistence, 0.35, returnPersistence, 0.25) : na
+persistenceScore := not na(persistenceScore) ? f_clamp(persistenceScore, -100.0, 100.0) : na
 
-int rsiScore =
-     na(rsiValue) ? 0 :
-     rsiValue >= rsiBullThreshold ? 1 :
-     rsiValue <= rsiBearThreshold ? -1 :
-     0
+float volatilityShortAtr = ta.atr(volatilityShortLength)
+float volatilityLongAtr = ta.atr(volatilityLongLength)
+float volatilityRatio = not na(volatilityLongAtr) and volatilityLongAtr > 0.0 ? volatilityShortAtr / volatilityLongAtr : na
+float volatilityMean = ta.sma(volatilityRatio, volatilityZLookback)
+float volatilityDeviation = ta.stdev(volatilityRatio, volatilityZLookback)
+float volatilityZ = not na(volatilityDeviation) and volatilityDeviation > 0.0 ? (volatilityRatio - volatilityMean) / volatilityDeviation : na
+float volatilityScore = not na(volatilityZ) ? f_clamp(50.0 + 50.0 * f_sat(volatilityZ / volatilityZScale), 0.0, 100.0) : na
+float volatilityRelevance = not na(volatilityScore) ? f_clamp(100.0 - 1.5 * math.abs(volatilityScore - 65.0), 0.0, 100.0) : na
 
-int emaScore =
-     fastEma > slowEma ? 1 :
-     fastEma < slowEma ? -1 :
-     0
+[htf1hScore, htf1hQuality] = request.security(regularSessionTicker, "60", f_htfMetricsConfirmed(), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+[htf4hScore, htf4hQuality] = request.security(regularSessionTicker, "240", f_htfMetricsConfirmed(), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+[htf1dScore, htf1dQuality] = request.security(regularSessionTicker, "1D", f_htfMetricsConfirmed(), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+[htf1wScore, htf1wQuality] = request.security(regularSessionTicker, "1W", f_htfMetricsConfirmed(), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+float htfNumerator = 0.0
+float htfDenominator = 0.0
+float htfMagnitude = 0.0
+float htfQualityNumerator = 0.0
+float htfQualityDenominator = 0.0
+if not na(htf1hScore)
+    htfNumerator := htfNumerator + 0.35 * htf1hScore
+    htfDenominator := htfDenominator + 0.35
+    htfMagnitude := htfMagnitude + 0.35 * math.abs(htf1hScore)
+if not na(htf1hQuality)
+    htfQualityNumerator := htfQualityNumerator + 0.35 * htf1hQuality
+    htfQualityDenominator := htfQualityDenominator + 0.35
+if not na(htf4hScore)
+    htfNumerator := htfNumerator + 0.30 * htf4hScore
+    htfDenominator := htfDenominator + 0.30
+    htfMagnitude := htfMagnitude + 0.30 * math.abs(htf4hScore)
+if not na(htf4hQuality)
+    htfQualityNumerator := htfQualityNumerator + 0.30 * htf4hQuality
+    htfQualityDenominator := htfQualityDenominator + 0.30
+if not na(htf1dScore)
+    htfNumerator := htfNumerator + 0.22 * htf1dScore
+    htfDenominator := htfDenominator + 0.22
+    htfMagnitude := htfMagnitude + 0.22 * math.abs(htf1dScore)
+if not na(htf1dQuality)
+    htfQualityNumerator := htfQualityNumerator + 0.22 * htf1dQuality
+    htfQualityDenominator := htfQualityDenominator + 0.22
+if not na(htf1wScore)
+    htfNumerator := htfNumerator + 0.13 * htf1wScore
+    htfDenominator := htfDenominator + 0.13
+    htfMagnitude := htfMagnitude + 0.13 * math.abs(htf1wScore)
+if not na(htf1wQuality)
+    htfQualityNumerator := htfQualityNumerator + 0.13 * htf1wQuality
+    htfQualityDenominator := htfQualityDenominator + 0.13
+float htfScore = htfDenominator > 0.0 ? htfNumerator / htfDenominator : na
+float htfCoherence = htfMagnitude > 0.0 ? f_clamp(math.abs(htfNumerator) / htfMagnitude, 0.0, 1.0) : na
+float htfAverageMagnitude = htfDenominator > 0.0 ? htfMagnitude / htfDenominator : na
+float htfAverageQuality = htfQualityDenominator > 0.0 ? htfQualityNumerator / htfQualityDenominator : na
+float htfConvictionBase = f_weighted2(htfAverageMagnitude, 0.45, htfAverageQuality, 0.55)
+float htfConviction = not na(htfConvictionBase) and not na(htfCoherence) ? f_clamp(htfConvictionBase * htfCoherence, 0.0, 100.0) : na
+float htfTacticalScore = f_weighted2(htf1hScore, 0.55, htf4hScore, 0.45)
+float htfMacroScore = f_weighted2(htf1dScore, 0.65, htf1wScore, 0.35)
+string htfBreadthText = f_htfBreadthText(htf1hScore, htf4hScore, htf1dScore, htf1wScore, htfDirectionalThreshold)
 
-int openingRangeScore =
-     not includeOpeningRangeInScore or not openingRangeFinalized ? 0 :
-     close > openingRangeHigh ? 1 :
-     close < openingRangeLow ? -1 :
-     0
+float localWeightScale = includeHigherTimeframes ? 0.85 : 1.0
+float trendWeight = 0.26 * localWeightScale
+float structureWeight = 0.24 * localWeightScale
+float momentumWeight = 0.21 * localWeightScale
+float participationWeight = 0.16 * localWeightScale
+float persistenceWeight = 0.13 * localWeightScale
+float htfWeight = includeHigherTimeframes ? 0.15 : 0.0
+float contextNumerator = 0.0
+float contextDenominator = 0.0
+float contextMagnitude = 0.0
+if not na(trendScore)
+    contextNumerator := contextNumerator + trendWeight * trendScore
+    contextDenominator := contextDenominator + trendWeight
+    contextMagnitude := contextMagnitude + trendWeight * math.abs(trendScore)
+if not na(structureScore)
+    contextNumerator := contextNumerator + structureWeight * structureScore
+    contextDenominator := contextDenominator + structureWeight
+    contextMagnitude := contextMagnitude + structureWeight * math.abs(structureScore)
+if not na(momentumScore)
+    contextNumerator := contextNumerator + momentumWeight * momentumScore
+    contextDenominator := contextDenominator + momentumWeight
+    contextMagnitude := contextMagnitude + momentumWeight * math.abs(momentumScore)
+if not na(participationScore)
+    contextNumerator := contextNumerator + participationWeight * participationScore
+    contextDenominator := contextDenominator + participationWeight
+    contextMagnitude := contextMagnitude + participationWeight * math.abs(participationScore)
+if not na(persistenceScore)
+    contextNumerator := contextNumerator + persistenceWeight * persistenceScore
+    contextDenominator := contextDenominator + persistenceWeight
+    contextMagnitude := contextMagnitude + persistenceWeight * math.abs(persistenceScore)
+if htfWeight > 0.0 and not na(htfScore)
+    contextNumerator := contextNumerator + htfWeight * htfScore
+    contextDenominator := contextDenominator + htfWeight
+    contextMagnitude := contextMagnitude + htfWeight * math.abs(htfScore)
+float contextDirection = contextDenominator > 0.0 ? f_clamp(contextNumerator / contextDenominator, -100.0, 100.0) : na
+float contextCoherence = contextMagnitude > 0.0 ? f_clamp(math.abs(contextNumerator) / contextMagnitude, 0.0, 1.0) : 0.0
+float contextAverageMagnitude = contextDenominator > 0.0 ? contextMagnitude / contextDenominator : 0.0
+float agreementScore = f_clamp(contextAverageMagnitude * contextCoherence, 0.0, 100.0)
+float contextConfidence = f_weighted4(agreementScore, 0.45, participationQuality, 0.30, volatilityRelevance, 0.15, not na(persistenceScore) ? math.abs(persistenceScore) : na, 0.10)
+contextConfidence := not na(contextConfidence) ? f_clamp(contextConfidence, 0.0, 100.0) : na
 
-bool bullishBar = close > open
-bool bearishBar = close < open
+var int regimeState = REGIME_BALANCED
+if barstate.isconfirmed and not na(contextDirection)
+    regimeState := f_updateRegime(regimeState, contextDirection)
+string regimeText = f_regimeText(regimeState)
+color regimeColor = f_regimeColor(regimeState)
+string levelsBiasText = f_levelsBias(contextDirection, contextConfidence)
+float zonePreference = f_zonePreference(contextDirection, contextConfidence)
 
-int participationScore =
-     not includeParticipationInScore or na(barRvol) or barRvol < highRvolThreshold ? 0 :
-     bullishBar ? 1 :
-     bearishBar ? -1 :
-     0
+int legacyVwapVote = not inRth or na(sessionVwap) ? 0 : close > sessionVwap ? 1 : close < sessionVwap ? -1 : 0
+int legacyRsiVote = na(rsiValue) ? 0 : rsiValue >= 55.0 ? 1 : rsiValue <= 45.0 ? -1 : 0
+int legacyEmaVote = fastEma > slowEma ? 1 : fastEma < slowEma ? -1 : 0
+int legacyOrVote = not openingRangeFinalized or openingRangeTimeframeWarning ? 0 : close > openingRangeHigh ? 1 : close < openingRangeLow ? -1 : 0
+int legacyParticipationVote = na(barRvol) or barRvol < highRvolThreshold ? 0 : close > open ? 1 : close < open ? -1 : 0
+int legacyScore = legacyVwapVote + legacyRsiVote + legacyEmaVote + legacyOrVote + legacyParticipationVote
 
-int contextScore =
-     vwapScore +
-     rsiScore +
-     emaScore +
-     openingRangeScore +
-     participationScore
+float scaledRvol = na(barRvol) ? na : math.min(barRvol / rvolDisplayCap, 1.0) * 100.0
+color rvolColumnColor = na(participationScore) ? color.new(neutralColor, 88) : participationScore >= 0.0 ? color.new(bullishColor, 82) : color.new(bearishColor, 82)
+plot(showRvol ? scaledRvol : na, "RVOL normalized", color = rvolColumnColor, style = plot.style_columns, linewidth = 1, histbase = 0)
+zeroPlot = plot(0.0, "Context Fill Baseline", color = color.new(neutralColor, 100), linewidth = 1)
+contextPlot = plot(showContextLine ? contextDirection : na, "Context Direction", color = regimeColor, linewidth = 3)
+fill(contextPlot, zeroPlot, color = showContextLine ? color.new(regimeColor, 91) : na, title = "Context fill")
+plot(showConfidenceLine ? contextConfidence : na, "Confidence Line", color = color.new(lightPurple, 15), linewidth = 1)
+plot(showRsiMomentum ? rsiMomentumScore : na, "RSI Momentum", color = color.new(neonPurple, 25), linewidth = 1)
+plot(showHtfComposite ? htfScore : na, "HTF Composite", color = color.new(#FBBF24, 20), linewidth = 2)
+plot(showLegacyComparison ? legacyScore * 20.0 : na, "Legacy v0.1 Score x20", color = color.new(#FDE68A, 30), linewidth = 1)
 
-string regimeText = f_regimeText(contextScore)
-color regimeColor = f_regimeColor(contextScore)
+hline(100.0, "Maximum", color = color.new(neutralColor, 100))
+hline(75.0, "+75 Strong Bull", color = color.new(strongBullColor, 70), linestyle = hline.style_dotted)
+hline(45.0, "+45 Bull", color = color.new(bullishColor, 78), linestyle = hline.style_dotted)
+hline(20.0, "+20 Bull Lean", color = color.new(bullishColor, 88), linestyle = hline.style_dotted)
+hline(0.0, "Balanced", color = color.new(neutralColor, 55), linestyle = hline.style_dashed)
+hline(-20.0, "-20 Bear Lean", color = color.new(bearishColor, 88), linestyle = hline.style_dotted)
+hline(-45.0, "-45 Bear", color = color.new(bearishColor, 78), linestyle = hline.style_dotted)
+hline(-75.0, "-75 Strong Bear", color = color.new(strongBearColor, 70), linestyle = hline.style_dotted)
+hline(-100.0, "Minimum", color = color.new(neutralColor, 100))
 
-string vwapState =
-     not inRth or na(sessionVwap) ? "n/a" :
-     close > sessionVwap ? "Above" :
-     close < sessionVwap ? "Below" :
-     "At"
+bgcolor(showRegimeBackground ? color.new(regimeColor, regimeBackgroundTransparency) : na, title = "Context regime background")
 
-string openingRangeState =
-     not inRth ? "Outside RTH" :
-     openingRangeTimeframeWarning ? "Use lower TF" :
-     not openingRangeFinalized ? "Forming" :
-     close > openingRangeHigh ? "Above" :
-     close < openingRangeLow ? "Below" :
-     "Inside"
-
-string emaState =
-     fastEma > slowEma ? str.tostring(fastEmaLength) + " > " + str.tostring(slowEmaLength) :
-     fastEma < slowEma ? str.tostring(fastEmaLength) + " < " + str.tostring(slowEmaLength) :
-     "Flat"
-
-string participationState =
-     f_rvolState(barRvol) +
-     (bullishBar ? " / Bull" : bearishBar ? " / Bear" : " / Flat")
-
-float scaledRvol =
-     na(barRvol) ? na :
-     math.min(barRvol / rvolDisplayCap, 1.0) * 100.0
-
-float scaledRvolBaseline =
-     math.min(normalRvolThreshold / rvolDisplayCap, 1.0) * 100.0
-
-color rvolColumnColor = f_rvolColor(barRvol, bullishBar)
-
-plot(
-     showRvol ? scaledRvol : na,
-     title = "RVOL normalized",
-     color = rvolColumnColor,
-     style = plot.style_columns,
-     linewidth = 1,
-     histbase = 0
-)
-
-plot(
-     showRvol and showRvolBaseline ? scaledRvolBaseline : na,
-     title = "RVOL 1.0x guide",
-     color = color.new(neutralColor, 78),
-     linewidth = 1,
-     style = plot.style_line
-)
-
-color rsiLineColor = color.from_gradient(
-     rsiValue,
-     rsiBearThreshold,
-     rsiBullThreshold,
-     bearishColor,
-     bullishColor
-)
-
-plot(
-     showRsi ? rsiValue : na,
-     title = "RSI",
-     color = rsiLineColor,
-     linewidth = 2
-)
-
-rsiUpperGuide = hline(
-     60,
-     "RSI 60",
-     color = showRsi ? color.new(bullishColor, 60) : na,
-     linestyle = hline.style_dotted
-)
-
-rsiCenterGuide = hline(
-     50,
-     "RSI 50",
-     color = showRsi ? color.new(neutralColor, 62) : na,
-     linestyle = hline.style_dashed
-)
-
-rsiLowerGuide = hline(
-     40,
-     "RSI 40",
-     color = showRsi ? color.new(bearishColor, 60) : na,
-     linestyle = hline.style_dotted
-)
-
-fill(
-     rsiUpperGuide,
-     rsiLowerGuide,
-     color = showRsi and showRsiZone ? color.new(neonPurple, 95) : na,
-     title = "RSI neutral zone"
-)
-
-hline(
-     70,
-     "RSI 70",
-     color = showRsi and showTraditionalRsiLevels ? color.new(bearishColor, 72) : na,
-     linestyle = hline.style_dotted
-)
-
-hline(
-     30,
-     "RSI 30",
-     color = showRsi and showTraditionalRsiLevels ? color.new(bullishColor, 72) : na,
-     linestyle = hline.style_dotted
-)
-
-hline(100, "Pane maximum", color = color.new(color.white, 100))
-hline(0, "Pane minimum", color = color.new(color.white, 100))
-
-bgcolor(
-     showRegimeBackground and inRth ?
-         color.new(regimeColor, regimeBackgroundTransparency) :
-         na,
-     title = "Context regime background"
-)
-
-plot(contextScore, "Context Score", display = display.none)
-plot(barRvol, "Bar RVOL", display = display.none)
-plot(cumulativeRvol, "Cumulative RVOL", display = display.none)
-plot(sessionVwap, "Daily RTH VWAP", display = display.none)
+plot(contextDirection, "Context Score", display = showResearchValues ? display.data_window : display.none)
+plot(contextConfidence, "Context Confidence", display = showResearchValues ? display.data_window : display.none)
+plot(agreementScore, "Agreement Score", display = showResearchValues ? display.data_window : display.none)
+plot(contextCoherence * 100.0, "Directional Coherence", display = showResearchValues ? display.data_window : display.none)
+plot(trendScore, "Trend Score", display = showResearchValues ? display.data_window : display.none)
+plot(structureScore, "Structure Score", display = showResearchValues ? display.data_window : display.none)
+plot(momentumScore, "Momentum Score", display = showResearchValues ? display.data_window : display.none)
+plot(participationScore, "Participation Score", display = showResearchValues ? display.data_window : display.none)
+plot(persistenceScore, "Persistence Score", display = showResearchValues ? display.data_window : display.none)
+plot(volatilityScore, "Volatility Score", display = showResearchValues ? display.data_window : display.none)
+plot(barRvol, "Bar RVOL", display = showResearchValues ? display.data_window : display.none)
+plot(cumulativeRvol, "Cumulative RVOL", display = showResearchValues ? display.data_window : display.none)
+plot(htfScore, "HTF Score", display = showResearchValues ? display.data_window : display.none)
+plot(htfConviction, "HTF Conviction", display = showResearchValues ? display.data_window : display.none)
+plot(htfCoherence * 100.0, "HTF Directional Coherence", display = showResearchValues ? display.data_window : display.none)
+plot(htfTacticalScore, "HTF Tactical Score", display = showResearchValues ? display.data_window : display.none)
+plot(htfMacroScore, "HTF Macro Score", display = showResearchValues ? display.data_window : display.none)
+plot(htf1hScore, "1H Trend Score", display = showResearchValues ? display.data_window : display.none)
+plot(htf4hScore, "4H Trend Score", display = showResearchValues ? display.data_window : display.none)
+plot(htf1dScore, "1D Trend Score", display = showResearchValues ? display.data_window : display.none)
+plot(htf1wScore, "1W Trend Score", display = showResearchValues ? display.data_window : display.none)
+plot(htf1hQuality, "1H Trend Quality", display = showResearchValues ? display.data_window : display.none)
+plot(htf4hQuality, "4H Trend Quality", display = showResearchValues ? display.data_window : display.none)
+plot(htf1dQuality, "1D Trend Quality", display = showResearchValues ? display.data_window : display.none)
+plot(htf1wQuality, "1W Trend Quality", display = showResearchValues ? display.data_window : display.none)
+plot(zonePreference, "Zone Preference", display = showResearchValues ? display.data_window : display.none)
+plot(legacyScore, "Legacy Context Score", display = showResearchValues ? display.data_window : display.none)
 
 var table contextTable = table.new(
      f_dashboardPosition(dashboardPositionInput),
-     2,
-     9,
+     3,
+     16,
      bgcolor = panelColor,
      frame_color = color.new(neonPurple, 35),
      frame_width = 1,
@@ -582,213 +591,95 @@ var table contextTable = table.new(
 )
 
 if barstate.islast
+    table.clear(contextTable, 0, 0, 2, 15)
     if showDashboard
         color headerBackground = color.new(neonPurple, 12)
         color rowBackground = color.new(panelColor, 3)
         color alternateBackground = color.new(#18121F, 4)
-
         f_tableCell(contextTable, 0, 0, "MERIDIAN CONTEXT", color.black, headerBackground, "Left")
-        f_tableCell(contextTable, 1, 0, f_scoreText(contextScore), color.black, headerBackground, "Right")
-
-        f_tableCell(contextTable, 0, 1, "Regime", neutralColor, rowBackground, "Left")
-        f_tableCell(contextTable, 1, 1, regimeText, regimeColor, rowBackground, "Right")
-
-        f_tableCell(contextTable, 0, 2, "RSI", neutralColor, alternateBackground, "Left")
-        f_tableCell(
-             contextTable,
-             1,
-             2,
-             str.tostring(rsiValue, "#.0") + " / " + f_rsiState(rsiValue),
-             f_rsiColor(rsiValue),
-             alternateBackground,
-             "Right"
-        )
-
-        f_tableCell(contextTable, 0, 3, "Bar RVOL", neutralColor, rowBackground, "Left")
-        f_tableCell(
-             contextTable,
-             1,
-             3,
-             f_formatRatio(barRvol) +
-                 (showDashboardVolumeValues ? "  " + f_formatVolume(barVolume) : ""),
-             f_rvolColor(barRvol, bullishBar),
-             rowBackground,
-             "Right"
-        )
-
-        f_tableCell(contextTable, 0, 4, "Cum RVOL", neutralColor, alternateBackground, "Left")
-        f_tableCell(
-             contextTable,
-             1,
-             4,
-             f_formatRatio(cumulativeRvol) +
-                 (showDashboardVolumeValues ? "  " + f_formatVolume(cumulativeVolume) : ""),
-             cumulativeRvol >= highRvolThreshold ? neonPurple : neutralColor,
-             alternateBackground,
-             "Right"
-        )
-
-        f_tableCell(contextTable, 0, 5, "VWAP", neutralColor, rowBackground, "Left")
-        f_tableCell(
-             contextTable,
-             1,
-             5,
-             vwapState,
-             vwapScore > 0 ? bullishColor : vwapScore < 0 ? bearishColor : neutralColor,
-             rowBackground,
-             "Right"
-        )
-
-        f_tableCell(contextTable, 0, 6, "Opening Range", neutralColor, alternateBackground, "Left")
-        f_tableCell(
-             contextTable,
-             1,
-             6,
-             openingRangeState,
-             openingRangeScore > 0 ? bullishColor : openingRangeScore < 0 ? bearishColor : neutralColor,
-             alternateBackground,
-             "Right"
-        )
-
-        f_tableCell(contextTable, 0, 7, "EMA Trend", neutralColor, rowBackground, "Left")
-        f_tableCell(
-             contextTable,
-             1,
-             7,
-             emaState,
-             emaScore > 0 ? bullishColor : emaScore < 0 ? bearishColor : neutralColor,
-             rowBackground,
-             "Right"
-        )
-
-        f_tableCell(contextTable, 0, 8, "Participation", neutralColor, alternateBackground, "Left")
-        f_tableCell(
-             contextTable,
-             1,
-             8,
-             participationState,
-             participationScore > 0 ? bullishColor :
-                 participationScore < 0 ? bearishColor :
-                 neutralColor,
-             alternateBackground,
-             "Right"
-        )
-    else
-        table.clear(contextTable, 0, 0, 1, 8)
-
-bool rawHighRvolCross = ta.crossover(barRvol, highRvolThreshold)
-bool rawExtremeRvolCross = ta.crossover(barRvol, extremeRvolThreshold)
-bool rawVwapReclaim = ta.crossover(close, sessionVwap)
-bool rawVwapLoss = ta.crossunder(close, sessionVwap)
-bool rawOpeningRangeBreakout = ta.crossover(close, openingRangeHigh)
-bool rawOpeningRangeBreakdown = ta.crossunder(close, openingRangeLow)
+        f_tableCell(contextTable, 1, 0, "v0.2.1", color.black, headerBackground, "Right")
+        f_tableCell(contextTable, 2, 0, regimeText, color.black, headerBackground, "Right")
+        f_tableCell(contextTable, 0, 1, "Direction", neutralColor, rowBackground, "Left")
+        f_tableCell(contextTable, 1, 1, f_scoreText(contextDirection), f_scoreColor(contextDirection), rowBackground, "Right")
+        f_tableCell(contextTable, 2, 1, regimeText, regimeColor, rowBackground, "Right")
+        f_tableCell(contextTable, 0, 2, "Confidence", neutralColor, alternateBackground, "Left")
+        f_tableCell(contextTable, 1, 2, na(contextConfidence) ? "n/a" : str.tostring(math.round(contextConfidence)), lightPurple, alternateBackground, "Right")
+        f_tableCell(contextTable, 2, 2, f_confidenceText(contextConfidence), lightPurple, alternateBackground, "Right")
+        f_tableCell(contextTable, 0, 3, "Levels Bias", neutralColor, rowBackground, "Left")
+        f_tableCell(contextTable, 1, 3, "", neutralColor, rowBackground, "Right")
+        f_tableCell(contextTable, 2, 3, levelsBiasText, zonePreference > 0.0 ? bullishColor : zonePreference < 0.0 ? bearishColor : neutralColor, rowBackground, "Right")
+        if dashboardMode == "Detailed"
+            f_tableCell(contextTable, 0, 4, "Trend", neutralColor, alternateBackground, "Left")
+            f_tableCell(contextTable, 1, 4, f_scoreText(trendScore), f_scoreColor(trendScore), alternateBackground, "Right")
+            f_tableCell(contextTable, 2, 4, f_componentText(trendScore), f_scoreColor(trendScore), alternateBackground, "Right")
+            f_tableCell(contextTable, 0, 5, "Structure", neutralColor, rowBackground, "Left")
+            f_tableCell(contextTable, 1, 5, f_scoreText(structureScore), f_scoreColor(structureScore), rowBackground, "Right")
+            f_tableCell(contextTable, 2, 5, f_componentText(structureScore), f_scoreColor(structureScore), rowBackground, "Right")
+            f_tableCell(contextTable, 0, 6, "Momentum", neutralColor, alternateBackground, "Left")
+            f_tableCell(contextTable, 1, 6, f_scoreText(momentumScore), f_scoreColor(momentumScore), alternateBackground, "Right")
+            f_tableCell(contextTable, 2, 6, f_componentText(momentumScore), f_scoreColor(momentumScore), alternateBackground, "Right")
+            f_tableCell(contextTable, 0, 7, "Participation", neutralColor, rowBackground, "Left")
+            f_tableCell(contextTable, 1, 7, f_scoreText(participationScore), f_scoreColor(participationScore), rowBackground, "Right")
+            f_tableCell(contextTable, 2, 7, f_componentText(participationScore), f_scoreColor(participationScore), rowBackground, "Right")
+            f_tableCell(contextTable, 0, 8, "Persistence", neutralColor, alternateBackground, "Left")
+            f_tableCell(contextTable, 1, 8, f_scoreText(persistenceScore), f_scoreColor(persistenceScore), alternateBackground, "Right")
+            f_tableCell(contextTable, 2, 8, f_componentText(persistenceScore), f_scoreColor(persistenceScore), alternateBackground, "Right")
+            f_tableCell(contextTable, 0, 9, "HTF Composite", neutralColor, rowBackground, "Left")
+            f_tableCell(contextTable, 1, 9, f_scoreText(htfScore), f_scoreColor(htfScore), rowBackground, "Right")
+            f_tableCell(contextTable, 2, 9, f_componentText(htfScore), f_scoreColor(htfScore), rowBackground, "Right")
+            f_tableCell(contextTable, 0, 10, "HTF Conviction", neutralColor, alternateBackground, "Left")
+            f_tableCell(contextTable, 1, 10, na(htfConviction) ? "n/a" : str.tostring(math.round(htfConviction)), lightPurple, alternateBackground, "Right")
+            f_tableCell(contextTable, 2, 10, htfBreadthText, f_scoreColor(htfScore), alternateBackground, "Right")
+            if showHigherTimeframeMatrix
+                f_tableCell(contextTable, 0, 11, "1H / 4H", neutralColor, rowBackground, "Left")
+                f_tableCell(contextTable, 1, 11, f_scoreText(htf1hScore) + " / " + f_scoreText(htf4hScore), neutralColor, rowBackground, "Right")
+                f_tableCell(contextTable, 2, 11, f_componentText(htf1hScore) + " / " + f_componentText(htf4hScore), f_scoreColor(htfTacticalScore), rowBackground, "Right")
+                f_tableCell(contextTable, 0, 12, "1D / 1W", neutralColor, alternateBackground, "Left")
+                f_tableCell(contextTable, 1, 12, f_scoreText(htf1dScore) + " / " + f_scoreText(htf1wScore), neutralColor, alternateBackground, "Right")
+                f_tableCell(contextTable, 2, 12, f_componentText(htf1dScore) + " / " + f_componentText(htf1wScore), f_scoreColor(htfMacroScore), alternateBackground, "Right")
+            f_tableCell(contextTable, 0, 13, "RVOL Bar / Cum", neutralColor, rowBackground, "Left")
+            f_tableCell(contextTable, 1, 13, f_ratioText(barRvol) + " / " + f_ratioText(cumulativeRvol), neutralColor, rowBackground, "Right")
+            f_tableCell(contextTable, 2, 13, f_rvolState(barRvol), not na(barRvol) and barRvol >= highRvolThreshold ? neonPurple : neutralColor, rowBackground, "Right")
+            f_tableCell(contextTable, 0, 14, "Volatility", neutralColor, alternateBackground, "Left")
+            f_tableCell(contextTable, 1, 14, na(volatilityScore) ? "n/a" : str.tostring(math.round(volatilityScore)), neutralColor, alternateBackground, "Right")
+            f_tableCell(contextTable, 2, 14, f_volatilityText(volatilityScore), volatilityScore >= 60.0 ? neonPurple : neutralColor, alternateBackground, "Right")
+            f_tableCell(contextTable, 0, 15, "Session", neutralColor, rowBackground, "Left")
+            f_tableCell(contextTable, 1, 15, inRth ? "RTH" : "OUTSIDE", inRth ? bullishColor : neutralColor, rowBackground, "Right")
+            f_tableCell(contextTable, 2, 15, openingRangeTimeframeWarning ? "OR: LOWER TF" : openingRangeFinalized ? "OR: FINAL" : inOpeningRange ? "OR: FORMING" : "OR: n/a", neutralColor, rowBackground, "Right")
+        else
+            f_tableCell(contextTable, 0, 4, "HTF", neutralColor, alternateBackground, "Left")
+            f_tableCell(contextTable, 1, 4, f_scoreText(htfScore), f_scoreColor(htfScore), alternateBackground, "Right")
+            f_tableCell(contextTable, 2, 4, na(htfConviction) ? "n/a" : "Q " + str.tostring(math.round(htfConviction)) + " · " + htfBreadthText, f_scoreColor(htfScore), alternateBackground, "Right")
+            f_tableCell(contextTable, 0, 5, "RVOL", neutralColor, rowBackground, "Left")
+            f_tableCell(contextTable, 1, 5, f_ratioText(barRvol), neutralColor, rowBackground, "Right")
+            f_tableCell(contextTable, 2, 5, f_rvolState(barRvol), not na(barRvol) and barRvol >= highRvolThreshold ? neonPurple : neutralColor, rowBackground, "Right")
+            f_tableCell(contextTable, 0, 6, "Volatility", neutralColor, alternateBackground, "Left")
+            f_tableCell(contextTable, 1, 6, na(volatilityScore) ? "n/a" : str.tostring(math.round(volatilityScore)), neutralColor, alternateBackground, "Right")
+            f_tableCell(contextTable, 2, 6, f_volatilityText(volatilityScore), volatilityScore >= 60.0 ? neonPurple : neutralColor, alternateBackground, "Right")
 
 bool confirmedBar = barstate.isconfirmed
+bool enteredStrongBull = enableAlerts and confirmedBar and regimeState == REGIME_STRONG_BULL and regimeState[1] != REGIME_STRONG_BULL
+bool enteredStrongBear = enableAlerts and confirmedBar and regimeState == REGIME_STRONG_BEAR and regimeState[1] != REGIME_STRONG_BEAR
+bool enteredBullish = enableAlerts and confirmedBar and regimeState > REGIME_BALANCED and regimeState[1] <= REGIME_BALANCED
+bool enteredBearish = enableAlerts and confirmedBar and regimeState < REGIME_BALANCED and regimeState[1] >= REGIME_BALANCED
+bool highConfidenceDirectionalRaw = not na(contextDirection) and not na(contextConfidence) and math.abs(contextDirection) >= highConfidenceDirectionThreshold and contextConfidence >= highConfidenceThreshold
+bool highConfidenceDirectional = enableAlerts and confirmedBar and highConfidenceDirectionalRaw and not highConfidenceDirectionalRaw[1]
+bool alignedParticipationRaw = not na(barRvol) and barRvol >= highRvolThreshold and not na(participationScore) and not na(contextDirection) and math.abs(contextDirection) >= 20.0 and f_sign(participationScore) == f_sign(contextDirection)
+bool alignedParticipationSurge = enableAlerts and confirmedBar and alignedParticipationRaw and not alignedParticipationRaw[1]
+var int lastStrongBullBar = na
+var int lastStrongBearBar = na
+if enteredStrongBull
+    lastStrongBullBar := bar_index
+if enteredStrongBear
+    lastStrongBearBar := bar_index
+bool bullContextFailure = enableAlerts and confirmedBar and not na(lastStrongBullBar) and bar_index - lastStrongBullBar <= contextFailureWindow and contextDirection < 20.0 and contextDirection[1] >= 20.0
+bool bearContextFailure = enableAlerts and confirmedBar and not na(lastStrongBearBar) and bar_index - lastStrongBearBar <= contextFailureWindow and contextDirection > -20.0 and contextDirection[1] <= -20.0
 
-bool enteredStrongBull =
-     enableAlerts and
-     alertStrongRegime and
-     confirmedBar and
-     contextScore >= 4 and
-     contextScore[1] < 4
-
-bool enteredStrongBear =
-     enableAlerts and
-     alertStrongRegime and
-     confirmedBar and
-     contextScore <= -4 and
-     contextScore[1] > -4
-
-bool highRvolCross =
-     enableAlerts and
-     alertHighRvol and
-     confirmedBar and
-     not na(barRvol) and
-     rawHighRvolCross
-
-bool extremeRvolCross =
-     enableAlerts and
-     alertHighRvol and
-     confirmedBar and
-     not na(barRvol) and
-     rawExtremeRvolCross
-
-bool vwapReclaim =
-     enableAlerts and
-     alertVwapCross and
-     confirmedBar and
-     inRth and
-     rawVwapReclaim
-
-bool vwapLoss =
-     enableAlerts and
-     alertVwapCross and
-     confirmedBar and
-     inRth and
-     rawVwapLoss
-
-bool openingRangeBreakoutWithVolume =
-     enableAlerts and
-     alertOpeningRangeWithVolume and
-     confirmedBar and
-     openingRangeFinalized and
-     not na(barRvol) and
-     barRvol >= highRvolThreshold and
-     rawOpeningRangeBreakout
-
-bool openingRangeBreakdownWithVolume =
-     enableAlerts and
-     alertOpeningRangeWithVolume and
-     confirmedBar and
-     openingRangeFinalized and
-     not na(barRvol) and
-     barRvol >= highRvolThreshold and
-     rawOpeningRangeBreakdown
-
-alertcondition(
-     enteredStrongBull,
-     "Strong Bullish Context",
-     "{{ticker}} entered a strong bullish options context. Score: {{plot(\"Context Score\")}}."
-)
-
-alertcondition(
-     enteredStrongBear,
-     "Strong Bearish Context",
-     "{{ticker}} entered a strong bearish options context. Score: {{plot(\"Context Score\")}}."
-)
-
-alertcondition(
-     highRvolCross,
-     "High RVOL",
-     "{{ticker}} bar RVOL crossed the high threshold. RVOL: {{plot(\"Bar RVOL\")}}."
-)
-
-alertcondition(
-     extremeRvolCross,
-     "Extreme RVOL",
-     "{{ticker}} bar RVOL crossed the extreme threshold. RVOL: {{plot(\"Bar RVOL\")}}."
-)
-
-alertcondition(
-     vwapReclaim,
-     "VWAP Reclaim",
-     "{{ticker}} reclaimed daily RTH VWAP at {{close}}."
-)
-
-alertcondition(
-     vwapLoss,
-     "VWAP Loss",
-     "{{ticker}} lost daily RTH VWAP at {{close}}."
-)
-
-alertcondition(
-     openingRangeBreakoutWithVolume,
-     "Opening-Range Breakout + RVOL",
-     "{{ticker}} broke above the opening range with high relative volume at {{close}}."
-)
-
-alertcondition(
-     openingRangeBreakdownWithVolume,
-     "Opening-Range Breakdown + RVOL",
-     "{{ticker}} broke below the opening range with high relative volume at {{close}}."
-)
+alertcondition(enteredStrongBull, "Strong Bull Context", "{{ticker}} entered Strong Bull context. Context: {{plot(\"Context Score\")}}.")
+alertcondition(enteredStrongBear, "Strong Bear Context", "{{ticker}} entered Strong Bear context. Context: {{plot(\"Context Score\")}}.")
+alertcondition(enteredBullish, "Bullish Context Transition", "{{ticker}} transitioned into bullish context. Context: {{plot(\"Context Score\")}}.")
+alertcondition(enteredBearish, "Bearish Context Transition", "{{ticker}} transitioned into bearish context. Context: {{plot(\"Context Score\")}}.")
+alertcondition(highConfidenceDirectional, "High-Confidence Directional Context", "{{ticker}} reached a high-confidence directional context. Context: {{plot(\"Context Score\")}} | Confidence: {{plot(\"Context Confidence\")}}.")
+alertcondition(alignedParticipationSurge, "Aligned RVOL Surge", "{{ticker}} printed a high-RVOL bar aligned with Context Direction. RVOL: {{plot(\"Bar RVOL\")}}.")
+alertcondition(bullContextFailure, "Bull Context Failure", "{{ticker}} lost a recent Strong Bull context within the configured failure window.")
+alertcondition(bearContextFailure, "Bear Context Failure", "{{ticker}} lost a recent Strong Bear context within the configured failure window.")
