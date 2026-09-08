@@ -1,6 +1,6 @@
 //@version=6
 // SPDX-License-Identifier: MPL-2.0
-// Meridian — Futures Levels · v0.1.0
+// Meridian — Futures Levels · v0.1.5
 
 indicator(
      title = "Meridian — Futures Levels",
@@ -193,9 +193,9 @@ f_window_active(int hourValue, int minuteValue, int durationMinutes, string time
     int endTimestamp = startTimestamp + durationMinutes * 60 * 1000
     timeframe.isintraday and time < endTimestamp and time_close > startTimestamp
 
-f_bar_hits_time(int hourValue, int minuteValue, string timezoneString) =>
+f_bar_reaches_time(int hourValue, int minuteValue, string timezoneString) =>
     int markerTimestamp = timestamp(timezoneString, year(time, timezoneString), month(time, timezoneString), dayofmonth(time, timezoneString), hourValue, minuteValue)
-    timeframe.isintraday and time <= markerTimestamp and time_close > markerTimestamp
+    timeframe.isintraday and time <= markerTimestamp and time_close >= markerTimestamp
 
 f_level_tag(string name, float price) =>
     showPriceInTags ? name + "  " + str.tostring(price, format.mintick) : name
@@ -223,37 +223,36 @@ int openingRangeMinutes = switch openingRangeDuration
 bool inOR        = inRTH and f_window_active(rthOpenHour, rthOpenMinute, openingRangeMinutes, sessionTimezone)
 bool inIB        = inRTH and f_window_active(rthOpenHour, rthOpenMinute, initialBalanceMinutes, sessionTimezone)
 
-bool newFutures   = inFutures and not inFutures[1]
-bool newOvernight = inOvernight and not inOvernight[1]
-bool newRTH       = inRTH and not inRTH[1]
+int localSessionDayKey = year(time, sessionTimezone) * 10000 + month(time, sessionTimezone) * 100 + dayofmonth(time, sessionTimezone)
+int tradingDayKey = time_tradingday
+bool tradingDayChanged = not na(tradingDayKey) and (na(tradingDayKey[1]) or tradingDayKey != tradingDayKey[1])
+bool localSessionDayChanged = na(localSessionDayKey[1]) or localSessionDayKey != localSessionDayKey[1]
+
+bool newFutures   = inFutures and (barstate.isfirst or not inFutures[1] or tradingDayChanged)
+bool newOvernight = inOvernight and (barstate.isfirst or not inOvernight[1] or tradingDayChanged)
+bool newRTH       = inRTH and (barstate.isfirst or not inRTH[1] or localSessionDayChanged)
 bool endRTH       = not inRTH and inRTH[1]
-bool newOR        = inOR and not inOR[1]
-bool newIB        = inIB and not inIB[1]
-bool newWeek      = timeframe.change("W")
+bool newOR        = inOR and (newRTH or barstate.isfirst or not inOR[1])
+bool newIB        = inIB and (newRTH or barstate.isfirst or not inIB[1])
+bool newWeek      = timeframe.change("W") or barstate.isfirst
 
-var int futuresStartBar   = bar_index
-var int overnightStartBar = bar_index
-var int rthStartBar       = bar_index
+var int overnightStartBar = na
+var int rthStartBar       = na
 var int rthEndBar         = na
-var int orStartBar        = bar_index
-var int ibStartBar        = bar_index
-var int weekStartBar      = bar_index
+var int orStartBar        = na
+var int ibStartBar        = na
 
-if newFutures
-    futuresStartBar := bar_index
-if newOvernight
+if newOvernight or (na(overnightStartBar) and inOvernight)
     overnightStartBar := bar_index
-if newRTH
+if newRTH or (na(rthStartBar) and inRTH)
     rthStartBar := bar_index
     rthEndBar := na
-if endRTH
+if endRTH and not na(rthStartBar)
     rthEndBar := math.max(rthStartBar, bar_index - 1)
-if newOR
+if newOR or (na(orStartBar) and inOR)
     orStartBar := bar_index
-if newIB
+if newIB or (na(ibStartBar) and inIB)
     ibStartBar := bar_index
-if newWeek
-    weekStartBar := bar_index
 
 var float futuresOpen = na
 var float rthOpen = na
@@ -266,14 +265,19 @@ var float rthHigh = na
 var float rthLow = na
 var float previousRthHigh = na
 var float previousRthLow = na
+var int activeRthDayKey = na
+var int previousRthDayKey = na
 
 if newRTH
-    if not na(rthHigh) and not na(rthLow)
+    if not na(rthHigh) and not na(rthLow) and not na(activeRthDayKey)
         previousRthHigh := rthHigh
         previousRthLow := rthLow
+        previousRthDayKey := activeRthDayKey
+    activeRthDayKey := localSessionDayKey
     rthHigh := high
     rthLow := low
 else if inRTH
+    activeRthDayKey := na(activeRthDayKey) ? localSessionDayKey : activeRthDayKey
     rthHigh := na(rthHigh) ? high : math.max(rthHigh, high)
     rthLow := na(rthLow) ? low : math.min(rthLow, low)
 
@@ -318,24 +322,36 @@ bool ibReadyForDisplay = not na(ibHigh) and not na(ibLow) and (showIBDeveloping 
 bool ibReadyForState = not na(ibHigh) and not na(ibLow) and not inIB
 
 string standardTicker = ticker.standard(syminfo.tickerid)
-[exchangePreviousHigh, exchangePreviousLow] = request.security(
-     standardTicker, "D", [high[1], low[1]],
+[exchangePreviousHigh, exchangePreviousLow, exchangePreviousTime] = request.security(
+     standardTicker, "D", [high[1], low[1], time[1]],
      gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
-[previousWeekHigh, previousWeekLow] = request.security(
-     standardTicker, "W", [high[1], low[1]],
+[previousWeekHigh, previousWeekLow, previousWeekTime] = request.security(
+     standardTicker, "W", [high[1], low[1], time[1]],
      gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
 
 float previousDayHigh = previousDayBasis == "Custom RTH session" ? previousRthHigh : exchangePreviousHigh
 float previousDayLow  = previousDayBasis == "Custom RTH session" ? previousRthLow : exchangePreviousLow
+int previousDayIdentity = previousDayBasis == "Custom RTH session" ? previousRthDayKey : exchangePreviousTime
+int previousWeekIdentity = previousWeekTime
 
-var float lastPreviousDayHigh = na
-var float lastPreviousWeekHigh = na
-if not na(previousDayHigh) and (na(lastPreviousDayHigh) or previousDayHigh != lastPreviousDayHigh)
-    futuresStartBar := bar_index
-    lastPreviousDayHigh := previousDayHigh
-if not na(previousWeekHigh) and (na(lastPreviousWeekHigh) or previousWeekHigh != lastPreviousWeekHigh)
-    weekStartBar := bar_index
-    lastPreviousWeekHigh := previousWeekHigh
+var int previousDayReferenceStartBar = na
+var int previousWeekReferenceStartBar = na
+var int lastPreviousDayIdentity = na
+var int lastPreviousWeekIdentity = na
+bool previousDayReferenceChanged = not na(previousDayIdentity) and (na(lastPreviousDayIdentity) or previousDayIdentity != lastPreviousDayIdentity)
+bool previousWeekReferenceChanged = not na(previousWeekIdentity) and (na(lastPreviousWeekIdentity) or previousWeekIdentity != lastPreviousWeekIdentity)
+
+if previousDayReferenceChanged
+    previousDayReferenceStartBar := bar_index
+    lastPreviousDayIdentity := previousDayIdentity
+else if na(previousDayReferenceStartBar) and not na(previousDayHigh)
+    previousDayReferenceStartBar := bar_index
+
+if previousWeekReferenceChanged
+    previousWeekReferenceStartBar := bar_index
+    lastPreviousWeekIdentity := previousWeekIdentity
+else if na(previousWeekReferenceStartBar) and not na(previousWeekHigh)
+    previousWeekReferenceStartBar := bar_index
 
 bool vwapInAnchor = switch vwapAnchor
     "RTH"                  => inRTH
@@ -405,8 +421,8 @@ int fibStartBar = switch fibAnchor
     "Opening Range"  => orStartBar
     "Initial Balance" => ibStartBar
     "Overnight"      => overnightStartBar
-    "Previous Day"   => futuresStartBar
-    => weekStartBar
+    "Previous Day"   => previousDayReferenceStartBar
+    => previousWeekReferenceStartBar
 
 float fibRange = fibHigh - fibLow
 bool fibReady = showFib and not na(fibLow) and not na(fibHigh) and fibRange > syminfo.mintick
@@ -468,8 +484,8 @@ array.set(trackedPrices, IDX_VU1,  vwapVisible and showBand1 ? vwapUpper1 : na)
 array.set(trackedPrices, IDX_VL1,  vwapVisible and showBand1 ? vwapLower1 : na)
 array.set(trackedPrices, IDX_FU1,  fibReady and showFibExtensions ? fibUp1 : na)
 array.set(trackedPrices, IDX_FD1,  fibReady and showFibExtensions ? fibDown1 : na)
-array.set(trackedPrices, IDX_RTHO, showSessionOpens and not na(rthOpen) ? rthOpen : na)
-array.set(trackedPrices, IDX_FUTO, showSessionOpens and not na(futuresOpen) ? futuresOpen : na)
+array.set(trackedPrices, IDX_RTHO, showSessionOpens and inRTH and not na(rthOpen) ? rthOpen : na)
+array.set(trackedPrices, IDX_FUTO, showSessionOpens and inFutures and not na(futuresOpen) ? futuresOpen : na)
 
 float clusterATR = ta.atr(clusterAtrLength)
 float stateATR = ta.atr(stateAtrLength)
@@ -493,7 +509,22 @@ if indicatorEnabled and showStates and barstate.isconfirmed
         float levelPrice = array.get(trackedPrices, i)
         float previousTrackedPrice = array.get(priorTrackedPrices, i)
         bool isDynamicVWAP = i >= IDX_VWAP and i <= IDX_VL1
+        bool sourceIdentityReset = (
+             (i >= IDX_VWAP and i <= IDX_VL1 and vwapReset) or
+             ((i == IDX_PDH or i == IDX_PDL) and previousDayReferenceChanged) or
+             ((i == IDX_PWH or i == IDX_PWL) and previousWeekReferenceChanged) or
+             (i == IDX_RTHO and newRTH) or
+             (i == IDX_FUTO and newFutures)
+        )
         bool levelChanged = not na(levelPrice) and not na(previousTrackedPrice) and math.abs(levelPrice - previousTrackedPrice) > math.max(stateTouchTolerance, syminfo.mintick * 2.0)
+
+        if sourceIdentityReset
+            array.set(aboveCounts, i, 0)
+            array.set(belowCounts, i, 0)
+            array.set(levelStates, i, 0)
+            array.set(priorTrackedPrices, i, na)
+            array.set(lastStateEventBars, i, -1000000)
+            previousTrackedPrice := na
 
         if na(levelPrice)
             array.set(aboveCounts, i, 0)
@@ -504,6 +535,8 @@ if indicatorEnabled and showStates and barstate.isconfirmed
                 array.set(aboveCounts, i, 0)
                 array.set(belowCounts, i, 0)
                 array.set(levelStates, i, 0)
+                array.set(lastStateEventBars, i, -1000000)
+                previousTrackedPrice := na
 
             bool aboveLevel = close > levelPrice + stateAcceptBuffer
             bool belowLevel = close < levelPrice - stateAcceptBuffer
@@ -515,8 +548,9 @@ if indicatorEnabled and showStates and barstate.isconfirmed
             bool acceptedAbove = nextAboveCount == stateAcceptCloses
             bool acceptedBelow = nextBelowCount == stateAcceptCloses
 
-            bool priorBelow = close[1] < levelPrice
-            bool priorAbove = close[1] > levelPrice
+            bool hasPriorReference = not na(previousTrackedPrice)
+            bool priorBelow = hasPriorReference and close[1] < previousTrackedPrice
+            bool priorAbove = hasPriorReference and close[1] > previousTrackedPrice
             bool bearishRejection = priorBelow and high >= levelPrice - stateTouchTolerance and close < levelPrice - stateAcceptBuffer and upperWick >= nz(stateATR) * stateMinimumWick
             bool bullishRejection = priorAbove and low <= levelPrice + stateTouchTolerance and close > levelPrice + stateAcceptBuffer and lowerWick >= nz(stateATR) * stateMinimumWick
 
@@ -598,7 +632,7 @@ if bestEventCode != 0 and showStateLabels
 if enableDynamicAlerts and bestEventCode != 0
     string jsonMessage = "{" +
          "\"source\":\"meridian_futures_levels\"," +
-         "\"version\":\"0.1.4\"," +
+         "\"version\":\"0.1.5\"," +
          "\"event\":\"level_state\"," +
          "\"symbol\":\"" + syminfo.tickerid + "\"," +
          "\"timeframe\":\"" + timeframe.period + "\"," +
@@ -864,6 +898,7 @@ if barstate.islast
 var line[] timeMarkerLines = array.new_line()
 var label[] timeMarkerLabels = array.new_label()
 var int[] timeMarkerDayKeys = array.new_int()
+var int lastTimeMarkerTimestamp = na
 
 int markerDayKey = year(time, sessionTimezone) * 10000 + month(time, sessionTimezone) * 100 + dayofmonth(time, sessionTimezone)
 var int activeMarkerDayKey = na
@@ -881,28 +916,30 @@ color markerLineColor = color.new(timeMarkerColor, timeMarkerTransparency)
 color markerTextColor = color.new(timeMarkerColor, 0)
 
 if indicatorEnabled and showTimeMarkers and timeframe.isintraday
-    bool hitPremarket = f_bar_hits_time(8, 30, sessionTimezone)
-    bool hitOpen = f_bar_hits_time(9, 30, sessionTimezone)
-    bool hitKillzoneEnd = f_bar_hits_time(11, 0, sessionTimezone)
-    bool hitClose = f_bar_hits_time(16, 0, sessionTimezone)
+    bool hitPremarket = f_bar_reaches_time(8, 30, sessionTimezone)
+    bool hitOpen = f_bar_reaches_time(9, 30, sessionTimezone)
+    bool hitKillzoneEnd = f_bar_reaches_time(11, 0, sessionTimezone)
+    bool hitClose = f_bar_reaches_time(16, 0, sessionTimezone)
 
     if hitPremarket or hitOpen or hitKillzoneEnd or hitClose
         int markerTs = hitPremarket ? timestamp(sessionTimezone, year(time, sessionTimezone), month(time, sessionTimezone), dayofmonth(time, sessionTimezone), 8, 30) :
              hitOpen ? timestamp(sessionTimezone, year(time, sessionTimezone), month(time, sessionTimezone), dayofmonth(time, sessionTimezone), 9, 30) :
              hitKillzoneEnd ? timestamp(sessionTimezone, year(time, sessionTimezone), month(time, sessionTimezone), dayofmonth(time, sessionTimezone), 11, 0) :
              timestamp(sessionTimezone, year(time, sessionTimezone), month(time, sessionTimezone), dayofmonth(time, sessionTimezone), 16, 0)
-        string markerTextSingle = hitPremarket ? "PRE-MARKET" : hitOpen ? "MARKET OPEN" : hitKillzoneEnd ? "NY KILLZONE END" : "MARKET CLOSE"
-        string markerText = timeMarkerLabelLayout == "Stacked" ? str.replace_all(markerTextSingle, " ", "\n") : markerTextSingle
-        line markerLine = line.new(markerTs, high + markerVerticalSpan, markerTs, low - markerVerticalSpan,
-             xloc = xloc.bar_time, extend = extend.both, color = markerLineColor, style = line.style_solid, width = 1)
-        array.push(timeMarkerLines, markerLine)
-        if showTimeMarkerLabels
-            label markerLabel = label.new(markerTs, markerLabelY, markerText,
-                 xloc = xloc.bar_time, yloc = yloc.price, style = label.style_none,
-                 color = color.new(timeMarkerColor, 100), textcolor = markerTextColor,
-                 textalign = text.align_center, size = f_label_size(timeMarkerTextSize))
-            array.push(timeMarkerLabels, markerLabel)
-            array.push(timeMarkerDayKeys, markerDayKey)
+        if na(lastTimeMarkerTimestamp) or markerTs != lastTimeMarkerTimestamp
+            lastTimeMarkerTimestamp := markerTs
+            string markerTextSingle = hitPremarket ? "PRE-MARKET" : hitOpen ? "MARKET OPEN" : hitKillzoneEnd ? "NY KILLZONE END" : "MARKET CLOSE"
+            string markerText = timeMarkerLabelLayout == "Stacked" ? str.replace_all(markerTextSingle, " ", "\n") : markerTextSingle
+            line markerLine = line.new(markerTs, high + markerVerticalSpan, markerTs, low - markerVerticalSpan,
+                 xloc = xloc.bar_time, extend = extend.both, color = markerLineColor, style = line.style_solid, width = 1)
+            array.push(timeMarkerLines, markerLine)
+            if showTimeMarkerLabels
+                label markerLabel = label.new(markerTs, markerLabelY, markerText,
+                     xloc = xloc.bar_time, yloc = yloc.price, style = label.style_none,
+                     color = color.new(timeMarkerColor, 100), textcolor = markerTextColor,
+                     textalign = text.align_center, size = f_label_size(timeMarkerTextSize))
+                array.push(timeMarkerLabels, markerLabel)
+                array.push(timeMarkerDayKeys, markerDayKey)
 
     while array.size(timeMarkerLines) > maxTimeMarkerEvents
         line.delete(array.shift(timeMarkerLines))
@@ -910,10 +947,11 @@ if indicatorEnabled and showTimeMarkers and timeframe.isintraday
         label.delete(array.shift(timeMarkerLabels))
         array.shift(timeMarkerDayKeys)
 
-    if barstate.islast and array.size(timeMarkerLabels) > 0
+    if array.size(timeMarkerLabels) > 0
         for markerIndex = 0 to array.size(timeMarkerLabels) - 1
             label markerLabel = array.get(timeMarkerLabels, markerIndex)
-            label.set_size(markerLabel, f_label_size(timeMarkerTextSize))
+            if barstate.islast
+                label.set_size(markerLabel, f_label_size(timeMarkerTextSize))
             if array.get(timeMarkerDayKeys, markerIndex) == markerDayKey
                 label.set_y(markerLabel, markerLabelY)
 else if barstate.islast
@@ -946,7 +984,8 @@ if barstate.islast
         label existingLabel = array.get(referenceLabels, i)
         float levelPrice = array.get(referencePrices, i)
         bool levelEnabled = array.get(referenceEnabled, i) and not na(levelPrice)
-        int startX = math.max(i < 2 ? futuresStartBar : weekStartBar, bar_index - 9999)
+        int referenceStartBar = i < 2 ? nz(previousDayReferenceStartBar, bar_index) : nz(previousWeekReferenceStartBar, bar_index)
+        int startX = math.max(referenceStartBar, bar_index - 9999)
         int endX = bar_index + rightExtension
         string levelName = array.get(referenceNames, i)
         color levelColor = array.get(referenceColors, i)
@@ -1083,8 +1122,8 @@ if barstate.islast
         f_push_level(sourcePrices, sourceNames, sourceWeights, clusterSessions and showIB and inRTH and ibReadyForState, ibLow, "IBL", 1.90)
         f_push_level(sourcePrices, sourceNames, sourceWeights, clusterSessions and showOvernight and not inOvernight, overnightHigh, "ONH", 1.45)
         f_push_level(sourcePrices, sourceNames, sourceWeights, clusterSessions and showOvernight and not inOvernight, overnightLow, "ONL", 1.45)
-        f_push_level(sourcePrices, sourceNames, sourceWeights, clusterSessions and showSessionOpens, rthOpen, "RTH Open", 1.15)
-        f_push_level(sourcePrices, sourceNames, sourceWeights, clusterSessions and showSessionOpens, futuresOpen, "Session Open", 1.15)
+        f_push_level(sourcePrices, sourceNames, sourceWeights, clusterSessions and showSessionOpens and inRTH, rthOpen, "RTH Open", 1.15)
+        f_push_level(sourcePrices, sourceNames, sourceWeights, clusterSessions and showSessionOpens and inFutures, futuresOpen, "Session Open", 1.15)
 
         f_push_level(sourcePrices, sourceNames, sourceWeights, clusterVWAP and vwapVisible, customVWAP, "VWAP", 1.35)
         f_push_level(sourcePrices, sourceNames, sourceWeights, clusterVWAP and vwapVisible and showBand1, vwapUpper1, "VWAP +1", 1.10)
@@ -1239,7 +1278,7 @@ if barstate.islast
         label.delete(array.pop(clusterLabels))
 
 var table hud = table.new(
-     f_table_position(hudPosition), 2, 7,
+     f_table_position(hudPosition), 2, 8,
      bgcolor = showHUD and indicatorEnabled ? color.new(panelColor, 12) : na,
      frame_color = showHUD and indicatorEnabled ? color.new(accentColor, 35) : na, frame_width = 1,
      border_color = showHUD and indicatorEnabled ? color.new(neutralColor, 82) : na, border_width = 1)
@@ -1251,29 +1290,39 @@ if barstate.islast
     string activeSession = inOR ? "Opening Range" : inIB ? "Initial Balance" : inRTH ? "RTH" : inOvernight ? "Overnight" : inFutures ? "Globex" : "Closed"
     color activeSessionColor = inRTH ? accentColor : inOvernight ? secondaryColor : neutralColor
     bool timeframeWarning = not timeframe.isintraday or timeframe.in_seconds() > 30 * 60
+    bool nonFuturesSymbol = syminfo.type != "futures"
+    int freshnessThresholdMs = math.max(int(timeframe.in_seconds() * 3000.0), 15 * 60 * 1000)
+    bool dataStale = timenow > time_close and timenow - time_close > freshnessThresholdMs
+    string dataState = barstate.isrealtime ? "LIVE" : dataStale ? "STALE / CLOSED" : "LAST CONFIRMED"
+    color dataStateColor = barstate.isrealtime ? supportColor : dataStale ? color.orange : neutralColor
     string orText = not na(orHigh) and not na(orLow) ? str.tostring(orHigh - orLow, format.mintick) : "—"
     string ibText = not na(ibHigh) and not na(ibLow) ? str.tostring(ibHigh - ibLow, format.mintick) : "—"
     string vwapText = not na(customVWAP) ? str.tostring(customVWAP, format.mintick) : "—"
+    string vwapLabel = "VWAP (" + (vwapAnchor == "Full Futures Session" ? "Session" : vwapAnchor) + ")"
     string lastStateText = lastEventName == "None" ? "Waiting" : lastEventName + " · " + lastEventState
+    string modeText = timeframeWarning ? "Use ≤30m; ≤15m preferred" : nonFuturesSymbol ? "Non-futures symbol" : "Confirmed states"
+    color modeColor = timeframeWarning or nonFuturesSymbol ? color.orange : supportColor
 
     color transparentPanel = showHUD and indicatorEnabled ? color.new(panelColor, 12) : color.new(panelColor, 100)
     color transparentText = showHUD and indicatorEnabled ? textColor : color.new(textColor, 100)
     color mutedHudText = showHUD and indicatorEnabled ? color.new(textColor, 25) : color.new(textColor, 100)
 
-    table.cell(hud, 0, 0, "MERIDIAN  —  FUTURES LEVELS", bgcolor = showHUD and indicatorEnabled ? color.new(accentColor, 18) : color.new(accentColor, 100), text_color = transparentText, text_size = f_label_size(hudTextSize))
-    table.cell(hud, 0, 1, "Session", bgcolor = transparentPanel, text_color = mutedHudText, text_size = f_label_size(hudTextSize))
+    table.cell(hud, 0, 0, "MERIDIAN  —  FUTURES LEVELS  ·  v0.1.5", bgcolor = showHUD and indicatorEnabled ? color.new(accentColor, 18) : color.new(accentColor, 100), text_color = transparentText, text_size = f_label_size(hudTextSize))
+    table.cell(hud, 0, 1, "Last bar", bgcolor = transparentPanel, text_color = mutedHudText, text_size = f_label_size(hudTextSize))
     table.cell(hud, 1, 1, activeSession, bgcolor = transparentPanel, text_color = showHUD and indicatorEnabled ? activeSessionColor : color.new(activeSessionColor, 100), text_size = f_label_size(hudTextSize))
-    table.cell(hud, 0, 2, "OR range", bgcolor = transparentPanel, text_color = mutedHudText, text_size = f_label_size(hudTextSize))
-    table.cell(hud, 1, 2, orText, bgcolor = transparentPanel, text_color = transparentText, text_size = f_label_size(hudTextSize))
-    table.cell(hud, 0, 3, "IB range", bgcolor = transparentPanel, text_color = mutedHudText, text_size = f_label_size(hudTextSize))
-    table.cell(hud, 1, 3, ibText, bgcolor = transparentPanel, text_color = transparentText, text_size = f_label_size(hudTextSize))
-    table.cell(hud, 0, 4, "VWAP", bgcolor = transparentPanel, text_color = mutedHudText, text_size = f_label_size(hudTextSize))
-    table.cell(hud, 1, 4, vwapText, bgcolor = transparentPanel, text_color = showHUD and indicatorEnabled ? vwapColor : color.new(vwapColor, 100), text_size = f_label_size(hudTextSize))
-    table.cell(hud, 0, 5, "Last state", bgcolor = transparentPanel, text_color = mutedHudText, text_size = f_label_size(hudTextSize))
-    table.cell(hud, 1, 5, lastStateText, bgcolor = transparentPanel, text_color = transparentText, text_size = f_label_size(hudTextSize))
-    table.cell(hud, 0, 6, timeframeWarning ? "Timeframe" : "Mode", bgcolor = transparentPanel, text_color = mutedHudText, text_size = f_label_size(hudTextSize))
-    table.cell(hud, 1, 6, timeframeWarning ? "Use ≤30m; ≤15m preferred" : "Confirmed states", bgcolor = transparentPanel,
-         text_color = showHUD and indicatorEnabled ? (timeframeWarning ? color.orange : supportColor) : color.new(textColor, 100), text_size = f_label_size(hudTextSize))
+    table.cell(hud, 0, 2, "Data", bgcolor = transparentPanel, text_color = mutedHudText, text_size = f_label_size(hudTextSize))
+    table.cell(hud, 1, 2, dataState, bgcolor = transparentPanel, text_color = showHUD and indicatorEnabled ? dataStateColor : color.new(dataStateColor, 100), text_size = f_label_size(hudTextSize))
+    table.cell(hud, 0, 3, "OR range", bgcolor = transparentPanel, text_color = mutedHudText, text_size = f_label_size(hudTextSize))
+    table.cell(hud, 1, 3, orText, bgcolor = transparentPanel, text_color = transparentText, text_size = f_label_size(hudTextSize))
+    table.cell(hud, 0, 4, "IB range", bgcolor = transparentPanel, text_color = mutedHudText, text_size = f_label_size(hudTextSize))
+    table.cell(hud, 1, 4, ibText, bgcolor = transparentPanel, text_color = transparentText, text_size = f_label_size(hudTextSize))
+    table.cell(hud, 0, 5, vwapLabel, bgcolor = transparentPanel, text_color = mutedHudText, text_size = f_label_size(hudTextSize))
+    table.cell(hud, 1, 5, vwapText, bgcolor = transparentPanel, text_color = showHUD and indicatorEnabled ? vwapColor : color.new(vwapColor, 100), text_size = f_label_size(hudTextSize))
+    table.cell(hud, 0, 6, "Last state", bgcolor = transparentPanel, text_color = mutedHudText, text_size = f_label_size(hudTextSize))
+    table.cell(hud, 1, 6, lastStateText, bgcolor = transparentPanel, text_color = transparentText, text_size = f_label_size(hudTextSize))
+    table.cell(hud, 0, 7, timeframeWarning ? "Timeframe" : "Mode", bgcolor = transparentPanel, text_color = mutedHudText, text_size = f_label_size(hudTextSize))
+    table.cell(hud, 1, 7, modeText, bgcolor = transparentPanel,
+         text_color = showHUD and indicatorEnabled ? modeColor : color.new(textColor, 100), text_size = f_label_size(hudTextSize))
 
 alertcondition(stateAcceptedAbove, "Meridian — Level accepted above", "Meridian Futures Levels: price accepted above a tracked level.")
 alertcondition(stateAcceptedBelow, "Meridian — Level accepted below", "Meridian Futures Levels: price accepted below a tracked level.")
