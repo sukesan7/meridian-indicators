@@ -1,9 +1,9 @@
 //@version=6
 // SPDX-License-Identifier: MPL-2.0
-// Meridian — Futures Context · v0.1.7
+// Meridian — Futures Context · v0.2.0
 
 indicator(
-     title = "Meridian — Futures Context",
+     title = "Meridian - Futures Context",
      shorttitle = "Meridian Futures Context",
      overlay = false,
      format = format.price,
@@ -19,7 +19,7 @@ const string G_VOL     = "04 — Realized Volatility"
 const string G_VWAP    = "05 — VWAP Context"
 const string G_EMA     = "06 — EMA Structure"
 const string G_TREND   = "07 — Trend Quality"
-const string G_RS      = "08 — Relative Strength"
+const string G_RS      = "08 — Intermarket"
 const string G_REGIME  = "09 — Regime Engine"
 const string G_PLOTS   = "10 — Supporting Plots"
 const string G_THEME   = "11 — Meridian Theme"
@@ -34,8 +34,12 @@ bool classifyOutsideRTH = input.bool(false, "Classify outside RTH", group = G_GE
 string rthSession = input.session("0930-1600:23456", "RTH session", group = G_SESSION)
 int rthOpenHour = input.int(9, "RTH open hour", minval = 0, maxval = 23, inline = "rthopen", group = G_SESSION)
 int rthOpenMinute = input.int(30, "Minute", minval = 0, maxval = 59, inline = "rthopen", group = G_SESSION)
+int rthCloseHour = input.int(16, "RTH close hour", minval = 0, maxval = 23, inline = "rthclose", group = G_SESSION)
+int rthCloseMinute = input.int(0, "Minute", minval = 0, maxval = 59, inline = "rthclose", group = G_SESSION)
+bool excludeIncompleteSessions = input.bool(true, "Exclude incomplete RTH sessions from baselines", group = G_SESSION,
+     tooltip = "Recommended. Sessions that end materially before the configured RTH close, such as many exchange holiday sessions or truncated data days, are not committed to same-time volume/range baselines.")
 int baselineSessions = input.int(40, "Historical sessions", minval = 5, maxval = 60, group = G_SESSION,
-     tooltip = "Number of prior sessions retained for each same-time chart slot.")
+     tooltip = "Number of prior completed sessions retained for each same-time chart slot.")
 int minimumBaselineSamples = input.int(10, "Minimum samples before display", minval = 3, maxval = 40, group = G_SESSION)
 int maximumSupportedMinutes = input.int(30, "Maximum supported chart timeframe", minval = 1, maxval = 60, group = G_SESSION,
      tooltip = "Same-time RVOL is intended for minute-based intraday charts. 1m, 5m, and 15m are recommended.")
@@ -75,14 +79,15 @@ int efficiencyLength = input.int(20, "Directional efficiency length", minval = 2
 float weakEfficiency = input.float(0.22, "Weak efficiency", minval = 0.01, maxval = 0.9, step = 0.01, inline = "eff", group = G_TREND)
 float strongEfficiency = input.float(0.55, "Strong efficiency", minval = 0.05, maxval = 1.0, step = 0.01, inline = "eff", group = G_TREND)
 
-bool enableRelativeStrength = input.bool(true, "Enable relative strength", group = G_RS)
-string relativeAnchorMode = input.string("Auto NQ/ES", "Anchor mode", options = ["Auto NQ/ES", "Custom"], group = G_RS)
-string customRelativeSymbol = input.symbol("CME_MINI:ES1!", "Custom anchor", group = G_RS)
+bool enableRelativeStrength = input.bool(true, "Enable intermarket analysis", group = G_RS)
+string relativeAnchorMode = input.string("Automatic", "Peer mode", options = ["Automatic", "Custom"], group = G_RS)
+string customRelativeSymbol = input.symbol("CME_MINI:ES1!", "Custom primary peer", group = G_RS)
+bool useSecondaryPeers = input.bool(true, "Use YM / RTY secondary peers", group = G_RS)
 int relativeHorizon = input.int(5, "Return horizon (bars)", minval = 1, maxval = 100, group = G_RS)
 int betaLength = input.int(100, "Rolling beta length", minval = 20, maxval = 1000, group = G_RS)
 int relativeZLength = input.int(150, "Residual z-score length", minval = 20, maxval = 1000, group = G_RS)
 float relativeDislocationZ = input.float(1.25, "Dislocation threshold (σ)", minval = 0.25, maxval = 5.0, step = 0.05, group = G_RS)
-bool includeRelativeInRegime = input.bool(true, "Use relative strength in regime", group = G_RS)
+bool includeRelativeInRegime = input.bool(true, "Use intermarket state in regime", group = G_RS)
 
 float directionThreshold = input.float(0.34, "Directional threshold", minval = 0.05, maxval = 0.9, step = 0.01, group = G_REGIME)
 float trendThreshold = input.float(0.54, "Trend-quality threshold", minval = 0.05, maxval = 0.95, step = 0.01, group = G_REGIME)
@@ -94,36 +99,29 @@ float rangeCompressionRatio = input.float(0.78, "Range compression ratio", minva
 
 bool showBarRvol = input.bool(true, "Show bar RVOL histogram", group = G_PLOTS)
 bool showCumulativeRvol = input.bool(true, "Show cumulative RVOL", group = G_PLOTS)
-bool showRealizedVolRatio = input.bool(true, "Show realized-volatility ratio", group = G_PLOTS)
+bool showRealizedVolRatio = input.bool(false, "Show realized-volatility ratio", group = G_PLOTS)
 bool showRangeRatio = input.bool(false, "Show developing-range ratio", group = G_PLOTS)
 float plotCap = input.float(4.0, "Visual plot cap", minval = 1.5, maxval = 20.0, step = 0.5, group = G_PLOTS,
      tooltip = "Caps extreme values visually without changing dashboard calculations or alerts.")
 bool showPlotValues = input.bool(false, "Show plot values on scale/status", group = G_PLOTS)
 
-color accentColor = input.color(color.rgb(168, 85, 247), "Meridian accent", group = G_THEME)
-color secondaryColor = input.color(color.rgb(99, 102, 241), "Secondary accent", group = G_THEME)
-color participationColor = input.color(color.rgb(45, 212, 191), "Participation", group = G_THEME)
-color volatilityColor = input.color(color.rgb(244, 114, 182), "Volatility", group = G_THEME)
-color bullishColor = input.color(color.rgb(34, 197, 94), "Bullish", group = G_THEME)
-color bearishColor = input.color(color.rgb(239, 68, 68), "Bearish", group = G_THEME)
-color histogramBullColor = input.color(color.rgb(21, 128, 61), "RVOL positive bars", group = G_THEME)
-color histogramBearColor = input.color(color.rgb(185, 28, 28), "RVOL negative bars", group = G_THEME)
-color warningColor = input.color(color.rgb(245, 158, 11), "Transition / warning", group = G_THEME)
-color neutralColor = input.color(color.rgb(148, 163, 184), "Neutral", group = G_THEME)
-color panelColor = input.color(color.rgb(15, 23, 42), "Dashboard background", group = G_THEME)
-color textColor = input.color(color.rgb(241, 245, 249), "Dashboard text", group = G_THEME)
-int cardTransparency = input.int(78, "Card transparency", minval = 40, maxval = 95, group = G_THEME)
+color accentColor = input.color(#8B5CF6, "Brand / header", group = G_THEME)
+color secondaryColor = input.color(#C4B5FD, "Secondary", group = G_THEME)
+color participationColor = input.color(#2DD4BF, "Participation", group = G_THEME)
+color volatilityColor = input.color(#FBBF24, "Volatility / warning", group = G_THEME)
+color bullishColor = input.color(#2DD4BF, "Bullish", group = G_THEME)
+color bearishColor = input.color(#F87171, "Bearish", group = G_THEME)
+color informationColor = input.color(#38BDF8, "Information", group = G_THEME)
+color pendingColor = input.color(#A1A1AA, "Pending / developing", group = G_THEME)
+color warningColor = input.color(#FBBF24, "Transition / warning", group = G_THEME)
+color neutralColor = input.color(#94A3B8, "Neutral", group = G_THEME)
+color panelColor = input.color(#090E17, "Dashboard background", group = G_THEME)
+color borderColor = input.color(#334155, "Dashboard border", group = G_THEME)
+color textColor = input.color(#F8FAFC, "Dashboard text", group = G_THEME)
+int cardTransparency = input.int(86, "Card transparency", minval = 70, maxval = 95, group = G_THEME)
 
 bool showDashboard = input.bool(true, "Show context dashboard", group = G_DASH)
-string dashboardPosition = input.string("Bottom Right", "Dashboard position", options = ["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group = G_DASH)
-string dashboardTextSize = input.string("Normal", "Dashboard text size", options = ["Tiny", "Small", "Normal", "Large"], group = G_DASH)
-int dashboardColumnWidth = input.int(15, "Column width (% of pane)", minval = 10, maxval = 22, group = G_DASH,
-     tooltip = "Each dashboard column uses this percentage of the indicator pane. Two 15% columns occupy roughly the right third of the pane.")
-int dashboardHeaderHeight = input.int(8, "Header height (% of pane)", minval = 4, maxval = 15, group = G_DASH,
-     tooltip = "Dashboard row heights are percentages of the indicator pane. Default total height is approximately 95%.")
-int dashboardCardHeight = input.int(27, "Card-row height (% of pane)", minval = 15, maxval = 30, group = G_DASH,
-     tooltip = "Applied to each of the three card rows. Three 27% rows occupy 81% of the pane.")
-int dashboardFooterHeight = input.int(6, "Footer height (% of pane)", minval = 2, maxval = 10, group = G_DASH)
+string dashboardTextSize = input.string("Small", "Dashboard text size", options = ["Tiny", "Small", "Normal"], group = G_DASH)
 bool enableDynamicAlerts = input.bool(false, "Enable dynamic JSON alert() calls", group = G_DASH,
      tooltip = "Create an alert using Any alert() function call. Events are emitted only on confirmed bars.")
 float alertRvolThreshold = input.float(2.0, "RVOL alert threshold", minval = 1.0, maxval = 20.0, step = 0.1, group = G_DASH)
@@ -150,13 +148,6 @@ f_number_text(float value, string pattern) =>
 f_signed_text(float value, string pattern) =>
     na(value) ? "—" : (value > 0.0 ? "+" : "") + str.tostring(value, pattern)
 
-f_table_position(string name) =>
-    switch name
-        "Top Left"     => position.top_left
-        "Bottom Right" => position.bottom_right
-        "Bottom Left"  => position.bottom_left
-        => position.top_right
-
 f_text_size(string name) =>
     switch name
         "Tiny"   => size.tiny
@@ -173,11 +164,11 @@ f_histogram_color(float ratio, float quietThreshold, float elevatedThreshold, fl
     else if ratio >= 1.0
         float denom = math.max(extremeThreshold - 1.0, 0.01)
         float strength = f_clamp((ratio - 1.0) / denom, 0.0, 1.0)
-        color.new(histogramBullColor, f_alpha_from_strength(strength, 72, 5))
+        color.new(participationColor, f_alpha_from_strength(strength, 72, 5))
     else
         float denom = math.max(1.0 - quietThreshold, 0.01)
         float strength = f_clamp((1.0 - ratio) / denom, 0.0, 1.0)
-        color.new(histogramBearColor, f_alpha_from_strength(strength, 72, 8))
+        color.new(pendingColor, f_alpha_from_strength(strength, 72, 8))
 
 f_regime_text(int code) =>
     switch code
@@ -203,6 +194,19 @@ f_regime_color(int code) =>
         9  => neutralColor
         => warningColor
 
+f_peer_metrics(float peerClose) =>
+    float chartOneBar = close > 0.0 and close[1] > 0.0 ? math.log(close / close[1]) : na
+    float peerOneBar = peerClose > 0.0 and peerClose[1] > 0.0 ? math.log(peerClose / peerClose[1]) : na
+    float corr = ta.correlation(chartOneBar, peerOneBar, betaLength)
+    float chartDev = ta.stdev(chartOneBar, betaLength)
+    float peerDev = ta.stdev(peerOneBar, betaLength)
+    float beta = not na(corr) and not na(peerDev) and peerDev > 1e-12 ? corr * chartDev / peerDev : na
+    float chartHorizon = close > 0.0 and close[relativeHorizon] > 0.0 ? math.log(close / close[relativeHorizon]) : na
+    float peerHorizon = peerClose > 0.0 and peerClose[relativeHorizon] > 0.0 ? math.log(peerClose / peerClose[relativeHorizon]) : na
+    float residual = not na(beta) and not na(chartHorizon) and not na(peerHorizon) ? chartHorizon - beta * peerHorizon : na
+    float residualZ = f_zscore(residual, relativeZLength)
+    [residualZ, corr, beta, peerHorizon]
+
 bool inRTH = not na(time(timeframe.period, rthSession, sessionTimezone))
 int localYear = year(time, sessionTimezone)
 int localMonth = month(time, sessionTimezone)
@@ -226,6 +230,53 @@ var float[] slotVolumeSums = array.new_float(MAX_RTH_SLOTS, 0.0)
 var float[] slotRangeSums = array.new_float(MAX_RTH_SLOTS, 0.0)
 var int[] slotSampleCounts = array.new_int(MAX_RTH_SLOTS, 0)
 var int[] slotWriteIndices = array.new_int(MAX_RTH_SLOTS, 0)
+var float[] pendingSessionVolumes = array.new_float(MAX_RTH_SLOTS, na)
+var float[] pendingSessionRanges = array.new_float(MAX_RTH_SLOTS, na)
+var int pendingLastSlot = -1
+var bool havePendingSession = false
+
+int rthOpenMinutes = rthOpenHour * 60 + rthOpenMinute
+int rthCloseMinutes = rthCloseHour * 60 + rthCloseMinute
+int rthDurationMinutes = rthCloseMinutes > rthOpenMinutes ? rthCloseMinutes - rthOpenMinutes : 24 * 60 - rthOpenMinutes + rthCloseMinutes
+int expectedRthSlots = supportedTimeframe and timeframeMinutes > 0 ? int(math.ceil(float(rthDurationMinutes) / timeframeMinutes)) : 0
+int expectedLastSlot = math.min(math.max(expectedRthSlots - 1, 0), MAX_RTH_SLOTS - 1)
+
+f_commit_pending_session() =>
+    bool completeEnough = pendingLastSlot >= math.max(expectedLastSlot - 1, 0)
+    bool commitSession = havePendingSession and (not excludeIncompleteSessions or completeEnough)
+    if commitSession
+        int upperSlot = math.min(pendingLastSlot, MAX_RTH_SLOTS - 1)
+        if upperSlot >= 0
+            for slot = 0 to upperSlot
+                float pendingVolume = array.get(pendingSessionVolumes, slot)
+                float pendingRange = array.get(pendingSessionRanges, slot)
+                if not na(pendingVolume) and not na(pendingRange)
+                    int writeIndex = array.get(slotWriteIndices, slot)
+                    int historyIndex = slot * baselineSessions + writeIndex
+                    int existingCount = array.get(slotSampleCounts, slot)
+                    float oldVolume = array.get(slotVolumeHistory, historyIndex)
+                    float oldRange = array.get(slotRangeHistory, historyIndex)
+                    if existingCount < baselineSessions
+                        array.set(slotVolumeHistory, historyIndex, pendingVolume)
+                        array.set(slotRangeHistory, historyIndex, pendingRange)
+                        array.set(slotVolumeSums, slot, array.get(slotVolumeSums, slot) + pendingVolume)
+                        array.set(slotRangeSums, slot, array.get(slotRangeSums, slot) + pendingRange)
+                        array.set(slotSampleCounts, slot, existingCount + 1)
+                    else
+                        array.set(slotVolumeHistory, historyIndex, pendingVolume)
+                        array.set(slotRangeHistory, historyIndex, pendingRange)
+                        array.set(slotVolumeSums, slot, array.get(slotVolumeSums, slot) - nz(oldVolume, 0.0) + pendingVolume)
+                        array.set(slotRangeSums, slot, array.get(slotRangeSums, slot) - nz(oldRange, 0.0) + pendingRange)
+                    array.set(slotWriteIndices, slot, (writeIndex + 1) % baselineSessions)
+    for slot = 0 to MAX_RTH_SLOTS - 1
+        array.set(pendingSessionVolumes, slot, na)
+        array.set(pendingSessionRanges, slot, na)
+    commitSession
+
+if newRTH
+    f_commit_pending_session()
+    pendingLastSlot := -1
+    havePendingSession := false
 
 int slotSamples = validSlot ? array.get(slotSampleCounts, currentSlot) : 0
 float slotVolumeAverage = validSlot and slotSamples > 0 ? array.get(slotVolumeSums, currentSlot) / slotSamples : na
@@ -237,10 +288,8 @@ var float rthHigh = na
 var float rthLow = na
 var float sessionCumulativeVolume = 0.0
 var float expectedCumulativeVolume = 0.0
-var int rthSessionsObserved = 0
 
 if newRTH
-    rthSessionsObserved += 1
     rthOpen := open
     rthHigh := high
     rthLow := low
@@ -258,27 +307,10 @@ float cumulativeRvol = inRTH and baselineReady and expectedCumulativeVolume > 0.
 float developingRangeRatio = inRTH and baselineReady ? f_safe_ratio(developingRange, slotRangeAverage) : na
 
 if barstate.isconfirmed and inRTH and validSlot
-    int writeIndex = array.get(slotWriteIndices, currentSlot)
-    int historyIndex = currentSlot * baselineSessions + writeIndex
-    int existingCount = array.get(slotSampleCounts, currentSlot)
-    float oldVolume = array.get(slotVolumeHistory, historyIndex)
-    float oldRange = array.get(slotRangeHistory, historyIndex)
-    float currentVolumeValue = nz(volume, 0.0)
-    float currentRangeValue = nz(developingRange, 0.0)
-
-    if existingCount < baselineSessions
-        array.set(slotVolumeHistory, historyIndex, currentVolumeValue)
-        array.set(slotRangeHistory, historyIndex, currentRangeValue)
-        array.set(slotVolumeSums, currentSlot, array.get(slotVolumeSums, currentSlot) + currentVolumeValue)
-        array.set(slotRangeSums, currentSlot, array.get(slotRangeSums, currentSlot) + currentRangeValue)
-        array.set(slotSampleCounts, currentSlot, existingCount + 1)
-    else
-        array.set(slotVolumeHistory, historyIndex, currentVolumeValue)
-        array.set(slotRangeHistory, historyIndex, currentRangeValue)
-        array.set(slotVolumeSums, currentSlot, array.get(slotVolumeSums, currentSlot) - nz(oldVolume, 0.0) + currentVolumeValue)
-        array.set(slotRangeSums, currentSlot, array.get(slotRangeSums, currentSlot) - nz(oldRange, 0.0) + currentRangeValue)
-
-    array.set(slotWriteIndices, currentSlot, (writeIndex + 1) % baselineSessions)
+    array.set(pendingSessionVolumes, currentSlot, nz(volume, 0.0))
+    array.set(pendingSessionRanges, currentSlot, nz(developingRange, 0.0))
+    pendingLastSlot := math.max(pendingLastSlot, currentSlot)
+    havePendingSession := true
 
 var float vwapCumulativeVolume = 0.0
 var float vwapCumulativePV = 0.0
@@ -307,14 +339,15 @@ float emaSlow = ta.ema(emaSource, emaSlowLength)
 float emaMaximum = math.max(emaFast, math.max(emaMid, emaSlow))
 float emaMinimum = math.min(emaFast, math.min(emaMid, emaSlow))
 float emaSpreadAtrValue = not na(atr) and atr > 0.0 ? (emaMaximum - emaMinimum) / atr : na
-float emaFastSlopeAtr = not na(atr) and atr > 0.0 ? (emaFast - emaFast[emaSlopeLookback]) / atr : na
+float emaFastSlopeAtr = not na(atr) and atr > 0.0 ? ((emaFast - emaFast[emaSlopeLookback]) / math.max(float(emaSlopeLookback), 1.0)) / atr : na
 
 bool emaBullStack = emaFast > emaMid and emaMid > emaSlow
 bool emaBearStack = emaFast < emaMid and emaMid < emaSlow
 bool emaCompressed = not na(emaSpreadAtrValue) and emaSpreadAtrValue <= emaCompressionAtr
 bool emaExpanded = not na(emaSpreadAtrValue) and emaSpreadAtrValue >= emaExpansionAtr
 
-string emaState = emaCompressed ? "Compressed" :
+string emaState = na(emaFast) or na(emaMid) or na(emaSlow) ? "Warming Up" :
+     emaCompressed ? "Compressed" :
      emaBullStack and emaExpanded and emaFastSlopeAtr > 0.0 ? "Bull Expansion" :
      emaBearStack and emaExpanded and emaFastSlopeAtr < 0.0 ? "Bear Expansion" :
      emaBullStack and close < emaFast and close >= emaMid ? "Bull Pullback" :
@@ -333,7 +366,7 @@ float realizedVolBaseline = ta.ema(realizedVolatility, realizedVolBaselineLength
 float realizedVolRatio = f_safe_ratio(realizedVolatility, realizedVolBaseline)
 float realizedVolZ = f_zscore(realizedVolatility, realizedVolZLength)
 
-float vwapSlopeAtrValue = inRTH and validSlot and currentSlot >= vwapSlopeLookback and not na(atr) and atr > 0.0 ? (rthVwap - rthVwap[vwapSlopeLookback]) / atr : na
+float vwapSlopeAtrValue = inRTH and validSlot and currentSlot >= vwapSlopeLookback and not na(atr) and atr > 0.0 ? ((rthVwap - rthVwap[vwapSlopeLookback]) / math.max(float(vwapSlopeLookback), 1.0)) / atr : na
 bool rawVwapCross = ta.cross(close, rthVwap)
 float vwapCrossSeries = inRTH and rawVwapCross ? 1.0 : 0.0
 float vwapCrossCount = ta.sma(vwapCrossSeries, vwapCrossLookback) * vwapCrossLookback
@@ -347,33 +380,57 @@ string vwapState = not inRTH or na(rthVwap) ? "Inactive" :
 
 bool chartIsNasdaqFuture = syminfo.root == "NQ" or syminfo.root == "MNQ"
 bool chartIsSpFuture = syminfo.root == "ES" or syminfo.root == "MES"
-string automaticRelativeSymbol = chartIsNasdaqFuture ? "CME_MINI:ES1!" : chartIsSpFuture ? "CME_MINI:NQ1!" : customRelativeSymbol
-string relativeSymbol = relativeAnchorMode == "Auto NQ/ES" ? automaticRelativeSymbol : customRelativeSymbol
+bool chartIsDowFuture = syminfo.root == "YM" or syminfo.root == "MYM"
+bool chartIsRtyFuture = syminfo.root == "RTY" or syminfo.root == "M2K"
+string primaryAutoPeer = chartIsNasdaqFuture ? "CME_MINI:ES1!" : chartIsSpFuture ? "CME_MINI:NQ1!" : chartIsDowFuture ? "CME_MINI:ES1!" : chartIsRtyFuture ? "CME_MINI:ES1!" : customRelativeSymbol
+string secondaryAutoPeer = chartIsNasdaqFuture or chartIsSpFuture ? "CBOT_MINI:YM1!" : "CME_MINI:NQ1!"
+string tertiaryAutoPeer = chartIsRtyFuture ? "CBOT_MINI:YM1!" : "CME_MINI:RTY1!"
+string primaryPeer = relativeAnchorMode == "Automatic" ? primaryAutoPeer : customRelativeSymbol
 
-float anchorClose = request.security(
-     relativeSymbol,
-     timeframe.period,
-     close,
-     gaps = barmerge.gaps_off,
-     lookahead = barmerge.lookahead_off,
-     ignore_invalid_symbol = true)
+float primaryClose = request.security(primaryPeer, timeframe.period, close, gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_off, ignore_invalid_symbol = true)
+float secondaryClose = request.security(secondaryAutoPeer, timeframe.period, close, gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_off, ignore_invalid_symbol = true)
+float tertiaryClose = request.security(tertiaryAutoPeer, timeframe.period, close, gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_off, ignore_invalid_symbol = true)
 
-float chartOneBarReturn = close > 0.0 and close[1] > 0.0 ? math.log(close / close[1]) : na
-float anchorOneBarReturn = anchorClose > 0.0 and anchorClose[1] > 0.0 ? math.log(anchorClose / anchorClose[1]) : na
-float returnCorrelation = ta.correlation(chartOneBarReturn, anchorOneBarReturn, betaLength)
-float chartReturnDeviation = ta.stdev(chartOneBarReturn, betaLength)
-float anchorReturnDeviation = ta.stdev(anchorOneBarReturn, betaLength)
-float rollingBeta = not na(returnCorrelation) and not na(anchorReturnDeviation) and anchorReturnDeviation > 1e-12 ? returnCorrelation * chartReturnDeviation / anchorReturnDeviation : na
+[primaryZ, primaryCorrelation, rollingBeta, primaryHorizonReturn] = f_peer_metrics(primaryClose)
+[secondaryZRaw, secondaryCorrelation, _, secondaryHorizonReturn] = f_peer_metrics(secondaryClose)
+[tertiaryZRaw, tertiaryCorrelation, _, tertiaryHorizonReturn] = f_peer_metrics(tertiaryClose)
+float secondaryZ = useSecondaryPeers ? secondaryZRaw : na
+float tertiaryZ = useSecondaryPeers ? tertiaryZRaw : na
 float chartHorizonReturn = close > 0.0 and close[relativeHorizon] > 0.0 ? math.log(close / close[relativeHorizon]) : na
-float anchorHorizonReturn = anchorClose > 0.0 and anchorClose[relativeHorizon] > 0.0 ? math.log(anchorClose / anchorClose[relativeHorizon]) : na
-float relativeResidual = not na(rollingBeta) ? chartHorizonReturn - rollingBeta * anchorHorizonReturn : na
-float relativeZ = f_zscore(relativeResidual, relativeZLength)
+
+float intermarketNumerator = 0.0
+float intermarketDenominator = 0.0
+float correlationNumerator = 0.0
+float correlationDenominator = 0.0
+if not na(primaryZ)
+    float quality = f_clamp(math.abs(nz(primaryCorrelation)), 0.0, 1.0)
+    intermarketNumerator += primaryZ * math.max(quality, 0.25)
+    intermarketDenominator += math.max(quality, 0.25)
+    correlationNumerator += math.abs(nz(primaryCorrelation))
+    correlationDenominator += 1.0
+if not na(secondaryZ)
+    float quality = f_clamp(math.abs(nz(secondaryCorrelation)), 0.0, 1.0)
+    intermarketNumerator += secondaryZ * math.max(quality, 0.25)
+    intermarketDenominator += math.max(quality, 0.25)
+    correlationNumerator += math.abs(nz(secondaryCorrelation))
+    correlationDenominator += 1.0
+if not na(tertiaryZ)
+    float quality = f_clamp(math.abs(nz(tertiaryCorrelation)), 0.0, 1.0)
+    intermarketNumerator += tertiaryZ * math.max(quality, 0.25)
+    intermarketDenominator += math.max(quality, 0.25)
+    correlationNumerator += math.abs(nz(tertiaryCorrelation))
+    correlationDenominator += 1.0
+float relativeZ = intermarketDenominator > 0.0 ? intermarketNumerator / intermarketDenominator : na
+float averagePeerCorrelation = correlationDenominator > 0.0 ? correlationNumerator / correlationDenominator : na
 bool relativeReady = enableRelativeStrength and not na(relativeZ)
 
-string relativeState = not enableRelativeStrength ? "Disabled" :
-     not relativeReady ? "Warming Up" :
-     relativeZ >= relativeDislocationZ ? "Leading" :
-     relativeZ <= -relativeDislocationZ ? "Lagging" : "In Line"
+int positiveMarkets = (not na(chartHorizonReturn) and chartHorizonReturn > 0.0 ? 1 : 0) + (not na(primaryHorizonReturn) and primaryHorizonReturn > 0.0 ? 1 : 0) + (useSecondaryPeers and not na(secondaryHorizonReturn) and secondaryHorizonReturn > 0.0 ? 1 : 0) + (useSecondaryPeers and not na(tertiaryHorizonReturn) and tertiaryHorizonReturn > 0.0 ? 1 : 0)
+int negativeMarkets = (not na(chartHorizonReturn) and chartHorizonReturn < 0.0 ? 1 : 0) + (not na(primaryHorizonReturn) and primaryHorizonReturn < 0.0 ? 1 : 0) + (useSecondaryPeers and not na(secondaryHorizonReturn) and secondaryHorizonReturn < 0.0 ? 1 : 0) + (useSecondaryPeers and not na(tertiaryHorizonReturn) and tertiaryHorizonReturn < 0.0 ? 1 : 0)
+int availableMarkets = (not na(chartHorizonReturn) ? 1 : 0) + (not na(primaryHorizonReturn) ? 1 : 0) + (useSecondaryPeers and not na(secondaryHorizonReturn) ? 1 : 0) + (useSecondaryPeers and not na(tertiaryHorizonReturn) ? 1 : 0)
+bool broadRiskOn = availableMarkets >= 3 and positiveMarkets >= math.ceil(availableMarkets * 0.75)
+bool broadRiskOff = availableMarkets >= 3 and negativeMarkets >= math.ceil(availableMarkets * 0.75)
+bool meaningfulDivergence = relativeReady and math.abs(relativeZ) >= relativeDislocationZ and nz(averagePeerCorrelation) >= 0.45
+string relativeState = not enableRelativeStrength ? "Disabled" : not relativeReady ? "Warming Up" : broadRiskOn ? "Broad Risk-On" : broadRiskOff ? "Broad Risk-Off" : meaningfulDivergence and relativeZ > 0.0 ? "Leading / Diverging" : meaningfulDivergence ? "Lagging / Diverging" : relativeZ >= relativeDislocationZ ? "Leading" : relativeZ <= -relativeDislocationZ ? "Lagging" : "In Line"
 
 float emaDirection = emaBullStack ? 1.0 : emaBearStack ? -1.0 : close >= emaMid ? 0.25 : -0.25
 float vwapDirection = inRTH and not na(rthVwap) ?
@@ -455,7 +512,7 @@ float regimeAgreement = switch regimeCode
     3  => balanceScore
     4  => compressionScore
     5  => expansionScore
-    9  => 1.0
+    9  => 0.0
     => f_clamp(1.20 - maximumCompetingScore, 0.35, 0.72)
 int regimeConfidence = int(math.round(f_clamp(regimeAgreement, 0.0, 1.0) * 100.0))
 string regimeText = f_regime_text(regimeCode)
@@ -471,7 +528,7 @@ string volatilityState = na(realizedVolRatio) ? "Warming Up" :
      realizedVolRatio >= volatilityExpansionRatio ? "Expanding" :
      realizedVolRatio <= volatilityContractionRatio ? "Contracting" : "Normal"
 
-string trendStrengthState = adx >= strongAdx ? "Strong" : adx <= weakAdx ? "Weak" : "Moderate"
+string trendStrengthState = na(adx) ? "Warming Up" : adx >= strongAdx ? "Strong" : adx <= weakAdx ? "Weak" : "Moderate"
 string rangeState = not inRTH ? "Inactive" :
      not baselineReady ? "Warming Up" :
      nz(developingRangeRatio) >= rangeExpansionRatio ? "Expanded" :
@@ -484,7 +541,7 @@ string sessionPhase = not inRTH ? "Outside RTH" :
      localMinutes < 840 ? "Midday" :
      localMinutes < 900 ? "Late Session" : "Power Hour"
 
-string relativeDetail = not relativeReady ? "No baseline" : f_signed_text(relativeZ, "#.##") + "σ · β " + f_number_text(rollingBeta, "#.##")
+string relativeDetail = not relativeReady ? "No baseline" : f_signed_text(relativeZ, "#.##") + "σ · Corr " + f_number_text(averagePeerCorrelation, "#.##")
 string participationDetail = "Bar " + f_ratio_text(barRvol) + " · Cum " + f_ratio_text(cumulativeRvol)
 string volatilityDetail = "RV " + f_ratio_text(realizedVolRatio) + " · Z " + f_signed_text(realizedVolZ, "#.##")
 string trendDetail = "ADX " + f_number_text(adx, "#.0") + " · Eff " + f_number_text(directionalEfficiency, "#.##")
@@ -498,10 +555,10 @@ float cappedRangeRatio = na(developingRangeRatio) ? na : math.min(developingRang
 
 color barRvolColor = f_histogram_color(barRvol, quietRvolThreshold, elevatedRvolThreshold, extremeRvolThreshold)
 contextPlotDisplay = showPlotValues ? display.all : display.all - display.price_scale - display.status_line
-plot(indicatorEnabled and showBarRvol ? cappedBarRvol : na, "Same-time Bar RVOL", color = barRvolColor, linewidth = 1, style = plot.style_columns, histbase = 1.0, display = contextPlotDisplay)
-plot(indicatorEnabled and showCumulativeRvol ? cappedCumulativeRvol : na, "Cumulative RVOL", color = participationColor, linewidth = 2, style = plot.style_line, display = contextPlotDisplay)
-plot(indicatorEnabled and showRealizedVolRatio ? cappedRealizedVolRatio : na, "Realized Volatility Ratio", color = volatilityColor, linewidth = 2, style = plot.style_line, display = contextPlotDisplay)
-plot(indicatorEnabled and showRangeRatio ? cappedRangeRatio : na, "Developing Range Ratio", color = secondaryColor, linewidth = 1, style = plot.style_line, display = contextPlotDisplay)
+plot(indicatorEnabled and showBarRvol ? cappedBarRvol : na, "Same-time Bar RVOL", color = barRvolColor, linewidth = 1, style = plot.style_columns, histbase = 0.0, display = contextPlotDisplay)
+plot(indicatorEnabled and showCumulativeRvol ? cappedCumulativeRvol : na, "Cumulative RVOL", color = participationColor, linewidth = 2, style = plot.style_linebr, display = contextPlotDisplay)
+plot(indicatorEnabled and showRealizedVolRatio ? cappedRealizedVolRatio : na, "Realized Volatility Ratio", color = volatilityColor, linewidth = 2, style = plot.style_linebr, display = contextPlotDisplay)
+plot(indicatorEnabled and showRangeRatio ? cappedRangeRatio : na, "Developing Range Ratio", color = secondaryColor, linewidth = 1, style = plot.style_linebr, display = contextPlotDisplay)
 hline(1.0, "Normal Baseline", color = color.new(neutralColor, 55), linestyle = hline.style_dotted, linewidth = 1)
 
 plot(directionScore, "Regime Direction Score", color = na, display = display.data_window)
@@ -509,117 +566,60 @@ plot(trendQualityScore, "Trend Quality Score", color = na, display = display.dat
 plot(expansionScore, "Expansion Score", color = na, display = display.data_window)
 plot(compressionScore, "Compression Score", color = na, display = display.data_window)
 plot(balanceScore, "Balance Score", color = na, display = display.data_window)
-plot(relativeZ, "Relative Residual Z", color = na, display = display.data_window)
+plot(relativeZ, "Intermarket Residual Z", color = na, display = display.data_window)
+plot(primaryZ, "Primary Peer Residual Z", color = na, display = display.data_window)
+plot(secondaryZ, "Secondary Peer Residual Z", color = na, display = display.data_window)
+plot(tertiaryZ, "Tertiary Peer Residual Z", color = na, display = display.data_window)
+plot(averagePeerCorrelation, "Average Peer Correlation", color = na, display = display.data_window)
 plot(vwapZ, "VWAP Z", color = na, display = display.data_window)
 plot(emaSpreadAtrValue, "EMA Spread / ATR", color = na, display = display.data_window)
 plot(directionalEfficiency, "Directional Efficiency", color = na, display = display.data_window)
 plot(adx, "ADX", color = na, display = display.data_window)
 
 var table dashboard = table.new(
-     f_table_position(dashboardPosition),
+     position.top_right,
      2,
-     5,
-     bgcolor = color.new(panelColor, 100),
-     frame_color = color.new(accentColor, 100),
+     8,
+     bgcolor = color.new(panelColor, 10),
+     frame_color = color.new(borderColor, 35),
      frame_width = 1,
-     border_color = color.new(neutralColor, 100),
+     border_color = color.new(borderColor, 72),
      border_width = 1)
 
 if barstate.isfirst
     table.merge_cells(dashboard, 0, 0, 1, 0)
-    table.merge_cells(dashboard, 0, 4, 1, 4)
 
 if barstate.islast
     bool dashboardVisible = indicatorEnabled and showDashboard
-    color invisiblePanel = color.new(panelColor, 100)
-    color visiblePanel = color.new(panelColor, 10)
-    color dashboardBackground = dashboardVisible ? visiblePanel : invisiblePanel
-    color dashboardFrame = dashboardVisible ? color.new(accentColor, 32) : color.new(accentColor, 100)
-    color dashboardBorder = dashboardVisible ? color.new(neutralColor, 82) : color.new(neutralColor, 100)
-    color dashboardText = dashboardVisible ? textColor : color.new(textColor, 100)
-    color dashboardMuted = dashboardVisible ? color.new(textColor, 28) : color.new(textColor, 100)
-    string headerText = "MERIDIAN  —  FUTURES CONTEXT"
-    string footerText = supportedTimeframe ? sessionPhase + " · " + timeframe.period + " · Samples " + str.tostring(slotSamples) + "/" + str.tostring(baselineSessions) : "Unsupported timeframe for same-time RVOL · Use 1m, 5m, or 15m"
+    color invisible = color.new(panelColor, 100)
+    color rowBackground = dashboardVisible ? color.new(panelColor, 10) : invisible
+    color alternateBackground = dashboardVisible ? color.new(panelColor, 4) : invisible
+    color visibleText = dashboardVisible ? textColor : color.new(textColor, 100)
+    color mutedText = dashboardVisible ? neutralColor : color.new(neutralColor, 100)
+    int freshnessThresholdMs = math.max(int(timeframe.in_seconds() * 3000.0), 15 * 60 * 1000)
+    bool dataStale = timenow > time_close and timenow - time_close > freshnessThresholdMs
+    string dataState = barstate.isrealtime ? "LIVE" : dataStale ? "STALE / CLOSED" : "CONFIRMED"
+    color dataColor = dataStale ? warningColor : barstate.isrealtime ? informationColor : neutralColor
+    string participationCompact = participationState + (not na(barRvol) ? " · " + f_ratio_text(barRvol) : "")
+    string trendCompact = emaState + " · " + trendStrengthState
+    string locationCompact = not inRTH ? "Inactive" : vwapState + " · " + rangeState
+    string regimeCompact = regimeCode == 9 ? regimeText : regimeText + " · " + str.tostring(regimeConfidence)
 
-    table.set_bgcolor(dashboard, dashboardBackground)
-    table.set_frame_color(dashboard, dashboardFrame)
-    table.set_border_color(dashboard, dashboardBorder)
-
-    table.cell(dashboard, 0, 0, headerText,
-         width = dashboardColumnWidth * 2,
-         height = dashboardHeaderHeight,
-         bgcolor = dashboardVisible ? color.new(accentColor, 16) : color.new(accentColor, 100),
-         text_color = dashboardText,
-         text_size = f_text_size(dashboardTextSize),
-         text_halign = text.align_center)
-
-    color participationCardColor = participationState == "Extreme" ? volatilityColor : participationState == "Elevated" ? participationColor : participationState == "Quiet" ? neutralColor : accentColor
-    color volatilityCardColor = volatilityState == "Expanding" ? volatilityColor : volatilityState == "Contracting" ? secondaryColor : neutralColor
-    color emaCardColor = str.contains(emaState, "Bull") ? bullishColor : str.contains(emaState, "Bear") ? bearishColor : emaCompressed ? neutralColor : warningColor
-    color relativeCardColor = relativeState == "Leading" ? bullishColor : relativeState == "Lagging" ? bearishColor : neutralColor
-    color locationCardColor = str.contains(vwapState, "Above") ? bullishColor : str.contains(vwapState, "Below") ? bearishColor : vwapRotating ? accentColor : neutralColor
-
-    table.cell(dashboard, 0, 1, "REGIME\n" + regimeText + "\n" + regimeDetail,
-         width = dashboardColumnWidth,
-         height = dashboardCardHeight,
-         bgcolor = dashboardVisible ? color.new(regimeColor, cardTransparency) : invisiblePanel,
-         text_color = dashboardText,
-         text_size = f_text_size(dashboardTextSize),
-         text_halign = text.align_left,
-         text_valign = text.align_center)
-
-    table.cell(dashboard, 1, 1, "PARTICIPATION\n" + participationState + "\n" + participationDetail,
-         width = dashboardColumnWidth,
-         height = dashboardCardHeight,
-         bgcolor = dashboardVisible ? color.new(participationCardColor, cardTransparency) : invisiblePanel,
-         text_color = dashboardText,
-         text_size = f_text_size(dashboardTextSize),
-         text_halign = text.align_left,
-         text_valign = text.align_center)
-
-    table.cell(dashboard, 0, 2, "TREND STRUCTURE\n" + emaState + " · " + trendStrengthState + "\n" + trendDetail,
-         width = dashboardColumnWidth,
-         height = dashboardCardHeight,
-         bgcolor = dashboardVisible ? color.new(emaCardColor, cardTransparency) : invisiblePanel,
-         text_color = dashboardText,
-         text_size = f_text_size(dashboardTextSize),
-         text_halign = text.align_left,
-         text_valign = text.align_center)
-
-    table.cell(dashboard, 1, 2, "VOLATILITY\n" + volatilityState + "\n" + volatilityDetail,
-         width = dashboardColumnWidth,
-         height = dashboardCardHeight,
-         bgcolor = dashboardVisible ? color.new(volatilityCardColor, cardTransparency) : invisiblePanel,
-         text_color = dashboardText,
-         text_size = f_text_size(dashboardTextSize),
-         text_halign = text.align_left,
-         text_valign = text.align_center)
-
-    table.cell(dashboard, 0, 3, "RELATIVE STRENGTH\n" + relativeState + "\n" + relativeDetail,
-         width = dashboardColumnWidth,
-         height = dashboardCardHeight,
-         bgcolor = dashboardVisible ? color.new(relativeCardColor, cardTransparency) : invisiblePanel,
-         text_color = dashboardText,
-         text_size = f_text_size(dashboardTextSize),
-         text_halign = text.align_left,
-         text_valign = text.align_center)
-
-    table.cell(dashboard, 1, 3, "LOCATION / RANGE\n" + vwapState + " · " + rangeState + "\n" + locationDetail,
-         width = dashboardColumnWidth,
-         height = dashboardCardHeight,
-         bgcolor = dashboardVisible ? color.new(locationCardColor, cardTransparency) : invisiblePanel,
-         text_color = dashboardText,
-         text_size = f_text_size(dashboardTextSize),
-         text_halign = text.align_left,
-         text_valign = text.align_center)
-
-    table.cell(dashboard, 0, 4, footerText,
-         width = dashboardColumnWidth * 2,
-         height = dashboardFooterHeight,
-         bgcolor = dashboardVisible ? color.new(panelColor, 18) : invisiblePanel,
-         text_color = supportedTimeframe ? dashboardMuted : dashboardVisible ? warningColor : color.new(warningColor, 100),
-         text_size = size.small,
-         text_halign = text.align_center)
+    table.cell(dashboard, 0, 0, "Meridian -- Futures Context", bgcolor = dashboardVisible ? color.new(accentColor, 18) : color.new(accentColor, 100), text_color = visibleText, text_size = f_text_size(dashboardTextSize), text_halign = text.align_left)
+    table.cell(dashboard, 0, 1, "Regime", bgcolor = rowBackground, text_color = mutedText, text_size = f_text_size(dashboardTextSize), text_halign = text.align_left)
+    table.cell(dashboard, 1, 1, regimeCompact, bgcolor = rowBackground, text_color = dashboardVisible ? regimeColor : color.new(regimeColor, 100), text_size = f_text_size(dashboardTextSize), text_halign = text.align_right)
+    table.cell(dashboard, 0, 2, "Participation", bgcolor = alternateBackground, text_color = mutedText, text_size = f_text_size(dashboardTextSize), text_halign = text.align_left)
+    table.cell(dashboard, 1, 2, participationCompact, bgcolor = alternateBackground, text_color = dashboardVisible ? participationColor : color.new(participationColor, 100), text_size = f_text_size(dashboardTextSize), text_halign = text.align_right)
+    table.cell(dashboard, 0, 3, "Trend", bgcolor = rowBackground, text_color = mutedText, text_size = f_text_size(dashboardTextSize), text_halign = text.align_left)
+    table.cell(dashboard, 1, 3, trendCompact, bgcolor = rowBackground, text_color = dashboardVisible ? (str.contains(emaState, "Bull") ? bullishColor : str.contains(emaState, "Bear") ? bearishColor : neutralColor) : invisible, text_size = f_text_size(dashboardTextSize), text_halign = text.align_right)
+    table.cell(dashboard, 0, 4, "Volatility", bgcolor = alternateBackground, text_color = mutedText, text_size = f_text_size(dashboardTextSize), text_halign = text.align_left)
+    table.cell(dashboard, 1, 4, volatilityState, bgcolor = alternateBackground, text_color = dashboardVisible ? (volatilityState == "Expanding" ? warningColor : neutralColor) : invisible, text_size = f_text_size(dashboardTextSize), text_halign = text.align_right)
+    table.cell(dashboard, 0, 5, "Intermarket", bgcolor = rowBackground, text_color = mutedText, text_size = f_text_size(dashboardTextSize), text_halign = text.align_left)
+    table.cell(dashboard, 1, 5, relativeState, bgcolor = rowBackground, text_color = dashboardVisible ? (str.contains(relativeState, "Leading") or relativeState == "Broad Risk-On" ? bullishColor : str.contains(relativeState, "Lagging") or relativeState == "Broad Risk-Off" ? bearishColor : informationColor) : invisible, text_size = f_text_size(dashboardTextSize), text_halign = text.align_right)
+    table.cell(dashboard, 0, 6, "Location", bgcolor = alternateBackground, text_color = mutedText, text_size = f_text_size(dashboardTextSize), text_halign = text.align_left)
+    table.cell(dashboard, 1, 6, locationCompact, bgcolor = alternateBackground, text_color = dashboardVisible ? informationColor : invisible, text_size = f_text_size(dashboardTextSize), text_halign = text.align_right)
+    table.cell(dashboard, 0, 7, "Data", bgcolor = rowBackground, text_color = mutedText, text_size = f_text_size(dashboardTextSize), text_halign = text.align_left)
+    table.cell(dashboard, 1, 7, dataState, bgcolor = rowBackground, text_color = dashboardVisible ? dataColor : invisible, text_size = f_text_size(dashboardTextSize), text_halign = text.align_right)
 
 bool regimeChanged = barstate.isconfirmed and inRTH and regimeCode != regimeCode[1]
 bool rvolSpike = barstate.isconfirmed and inRTH and not na(barRvol) and barRvol >= alertRvolThreshold and nz(barRvol[1], 0.0) < alertRvolThreshold
@@ -631,7 +631,7 @@ string dynamicEvent = regimeChanged ? "regime_change" : rvolSpike ? "rvol_spike"
 if enableDynamicAlerts and str.length(dynamicEvent) > 0
     string jsonMessage = "{" +
          "\"source\":\"meridian_futures_context\"," +
-         "\"version\":\"0.1.5\"," +
+         "\"version\":\"0.2.0\"," +
          "\"event\":\"" + dynamicEvent + "\"," +
          "\"symbol\":\"" + syminfo.tickerid + "\"," +
          "\"timeframe\":\"" + timeframe.period + "\"," +

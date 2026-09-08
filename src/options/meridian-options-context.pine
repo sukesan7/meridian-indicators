@@ -1,6 +1,6 @@
 //@version=6
 // SPDX-License-Identifier: MPL-2.0
-// Meridian — Options Context · v0.2.1
+// Meridian — Options Context · v0.3.0
 
 indicator(
      title = "Meridian - Options Context",
@@ -91,7 +91,6 @@ int regimeBackgroundTransparency = input.int(96, "Regime background transparency
 
 bool showDashboard = input.bool(true, "Show dashboard", group = GROUP_DASHBOARD)
 string dashboardMode = input.string("Detailed", "Dashboard mode", options = ["Detailed", "Compact"], group = GROUP_DASHBOARD)
-string dashboardPositionInput = input.string("Top Right", "Dashboard position", options = ["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group = GROUP_DASHBOARD)
 string dashboardSizeInput = input.string("Small", "Dashboard text size", options = ["Tiny", "Small", "Normal"], group = GROUP_DASHBOARD)
 
 bool enableAlerts = input.bool(true, "Enable alert conditions", group = GROUP_ALERTS)
@@ -99,14 +98,17 @@ float highConfidenceDirectionThreshold = input.float(55.0, "High-confidence dire
 float highConfidenceThreshold = input.float(60.0, "High-confidence confidence threshold", minval = 20.0, maxval = 100.0, step = 5.0, group = GROUP_ALERTS)
 int contextFailureWindow = input.int(12, "Strong-regime failure window (bars)", minval = 2, maxval = 50, group = GROUP_ALERTS)
 
-color neonPurple = input.color(#D946EF, "Neon purple", group = GROUP_COLORS)
-color lightPurple = input.color(#C4B5FD, "Confidence / secondary", group = GROUP_COLORS)
-color bullishColor = input.color(#22D3EE, "Bullish", group = GROUP_COLORS)
-color bearishColor = input.color(#FB7185, "Bearish", group = GROUP_COLORS)
-color strongBullColor = input.color(#39FF88, "Strong bullish", group = GROUP_COLORS)
-color strongBearColor = input.color(#FF4D6D, "Strong bearish", group = GROUP_COLORS)
-color neutralColor = input.color(#A1A1AA, "Neutral", group = GROUP_COLORS)
-color panelColor = input.color(#111118, "Dashboard background", group = GROUP_COLORS)
+color brandColor = input.color(#8B5CF6, "Brand / header", group = GROUP_COLORS)
+color bullishColor = input.color(#2DD4BF, "Bullish / support", group = GROUP_COLORS)
+color bearishColor = input.color(#F87171, "Bearish / resistance", group = GROUP_COLORS)
+color informationColor = input.color(#38BDF8, "Information", group = GROUP_COLORS)
+color neutralColor = input.color(#94A3B8, "Neutral", group = GROUP_COLORS)
+color pendingColor = input.color(#A1A1AA, "Pending / developing", group = GROUP_COLORS)
+color warningColor = input.color(#FBBF24, "Warning", group = GROUP_COLORS)
+color secondaryColor = input.color(#C4B5FD, "Secondary / confidence", group = GROUP_COLORS)
+color panelColor = input.color(#090E17, "Dashboard background", group = GROUP_COLORS)
+color borderColor = input.color(#334155, "Dashboard border", group = GROUP_COLORS)
+color textColor = input.color(#F8FAFC, "Dashboard text", group = GROUP_COLORS)
 
 bool showResearchValues = input.bool(false, "Show research values in Data Window", group = GROUP_RESEARCH)
 bool showLegacyComparison = input.bool(false, "Show v0.1 binary-score comparison", group = GROUP_RESEARCH)
@@ -173,12 +175,6 @@ f_weighted4(float v1, float w1, float v2, float w2, float v3, float w3, float v4
         denominator := denominator + w4
     denominator > 0.0 ? numerator / denominator : na
 
-f_dashboardPosition(string positionText) =>
-    positionText == "Top Left" ? position.top_left :
-     positionText == "Bottom Right" ? position.bottom_right :
-     positionText == "Bottom Left" ? position.bottom_left :
-     position.top_right
-
 f_textSize(string sizeText) =>
     sizeText == "Normal" ? size.normal : sizeText == "Small" ? size.small : size.tiny
 
@@ -235,17 +231,14 @@ f_componentText(float score) =>
     na(score) ? "n/a" : score >= 75.0 ? "STRONG BULL" : score >= 45.0 ? "BULL" : score >= 20.0 ? "BULL LEAN" : score <= -75.0 ? "STRONG BEAR" : score <= -45.0 ? "BEAR" : score <= -20.0 ? "BEAR LEAN" : "BALANCED"
 
 f_regimeColor(int state) =>
-    state == REGIME_STRONG_BULL ? strongBullColor :
+    state == REGIME_STRONG_BULL ? bullishColor :
      state == REGIME_BULL or state == REGIME_BULL_LEAN ? bullishColor :
-     state == REGIME_STRONG_BEAR ? strongBearColor :
+     state == REGIME_STRONG_BEAR ? bearishColor :
      state == REGIME_BEAR or state == REGIME_BEAR_LEAN ? bearishColor :
      neutralColor
 
 f_scoreColor(float score) =>
-    na(score) ? neutralColor : score >= 75.0 ? strongBullColor : score >= 20.0 ? bullishColor : score <= -75.0 ? strongBearColor : score <= -20.0 ? bearishColor : neutralColor
-
-f_rvolState(float value) =>
-    na(value) ? "n/a" : value >= extremeRvolThreshold ? "EXTREME" : value >= highRvolThreshold ? "HIGH" : value >= 1.0 ? "NORMAL" : "LOW"
+    na(score) ? neutralColor : score >= 75.0 ? bullishColor : score >= 20.0 ? bullishColor : score <= -75.0 ? bearishColor : score <= -20.0 ? bearishColor : neutralColor
 
 f_levelsBias(float direction, float confidence) =>
     na(direction) or na(confidence) ? "n/a" : confidence < 35.0 ? "LOW CONVICTION" : direction >= 45.0 ? "PREFER SUPPORT" : direction <= -45.0 ? "PREFER RESISTANCE" : direction >= 20.0 ? "SUPPORT LEAN" : direction <= -20.0 ? "RESISTANCE LEAN" : "TWO-SIDED"
@@ -302,9 +295,12 @@ bool inRth = not na(time(timeframe.period, rthSession, sessionTimezone))
 int calendarDayKey = year(time, sessionTimezone) * 10000 + month(time, sessionTimezone) * 100 + dayofmonth(time, sessionTimezone)
 bool newCalendarDay = na(calendarDayKey[1]) or calendarDayKey != calendarDayKey[1]
 bool rthStart = inRth and (session.isfirstbar_regular or newCalendarDay or not inRth[1])
+int staleThresholdMs = int(math.max(timeframe.in_seconds() * 1000.0 * 3.0, 30.0 * 60.0 * 1000.0))
+bool staleData = barstate.islast and timenow > time_close + staleThresholdMs
+string dataState = staleData ? "STALE / CLOSED" : barstate.isrealtime and not barstate.isconfirmed ? "LIVE" : "CONFIRMED"
 
 if barstate.isfirst and (not timeframe.isintraday or timeframe.in_seconds() >= 3600)
-    runtime.error("Meridian Options Context v0.2 is designed for intraday charts below 60 minutes.")
+    runtime.error("Meridian Options Context is designed for intraday charts below 60 minutes.")
 
 float atr = ta.atr(atrLength)
 float atrSafe = math.max(nz(atr, syminfo.mintick), syminfo.mintick)
@@ -337,8 +333,8 @@ bool openingRangeTimeframeWarning = timeframe.in_seconds() > openingRangeMinutes
 float fastEma = ta.ema(close, fastEmaLength)
 float slowEma = ta.ema(close, slowEmaLength)
 float spreadNorm = (fastEma - slowEma) / atrSafe
-float slowSlopeNorm = (slowEma - slowEma[trendSlopeLookback]) / atrSafe
-float fastSlopeNorm = (fastEma - fastEma[trendSlopeLookback]) / atrSafe
+float slowSlopeNorm = ((slowEma - slowEma[trendSlopeLookback]) / math.max(float(trendSlopeLookback), 1.0)) / atrSafe
+float fastSlopeNorm = ((fastEma - fastEma[trendSlopeLookback]) / math.max(float(trendSlopeLookback), 1.0)) / atrSafe
 float trendSpreadScore = f_bound(spreadNorm / trendSpreadScale)
 float trendSlowSlopeScore = f_bound(slowSlopeNorm / trendSlopeScale)
 float trendFastSlopeScore = f_bound(fastSlopeNorm / trendSlopeScale)
@@ -534,19 +530,19 @@ plot(showRvol ? scaledRvol : na, "RVOL normalized", color = rvolColumnColor, sty
 zeroPlot = plot(0.0, "Context Fill Baseline", color = color.new(neutralColor, 100), linewidth = 1)
 contextPlot = plot(showContextLine ? contextDirection : na, "Context Direction", color = regimeColor, linewidth = 3)
 fill(contextPlot, zeroPlot, color = showContextLine ? color.new(regimeColor, 91) : na, title = "Context fill")
-plot(showConfidenceLine ? contextConfidence : na, "Confidence Line", color = color.new(lightPurple, 15), linewidth = 1)
-plot(showRsiMomentum ? rsiMomentumScore : na, "RSI Momentum", color = color.new(neonPurple, 25), linewidth = 1)
+plot(showConfidenceLine ? contextConfidence : na, "Confidence Line", color = color.new(secondaryColor, 15), linewidth = 1)
+plot(showRsiMomentum ? rsiMomentumScore : na, "RSI Momentum", color = color.new(brandColor, 25), linewidth = 1)
 plot(showHtfComposite ? htfScore : na, "HTF Composite", color = color.new(#FBBF24, 20), linewidth = 2)
-plot(showLegacyComparison ? legacyScore * 20.0 : na, "Legacy v0.1 Score x20", color = color.new(#FDE68A, 30), linewidth = 1)
+plot(showLegacyComparison ? legacyScore * 20.0 : na, "Legacy v0.1 Score x20", color = color.new(warningColor, 30), linewidth = 1)
 
 hline(100.0, "Maximum", color = color.new(neutralColor, 100))
-hline(75.0, "+75 Strong Bull", color = color.new(strongBullColor, 70), linestyle = hline.style_dotted)
+hline(75.0, "+75 Strong Bull", color = color.new(bullishColor, 70), linestyle = hline.style_dotted)
 hline(45.0, "+45 Bull", color = color.new(bullishColor, 78), linestyle = hline.style_dotted)
 hline(20.0, "+20 Bull Lean", color = color.new(bullishColor, 88), linestyle = hline.style_dotted)
 hline(0.0, "Balanced", color = color.new(neutralColor, 55), linestyle = hline.style_dashed)
 hline(-20.0, "-20 Bear Lean", color = color.new(bearishColor, 88), linestyle = hline.style_dotted)
 hline(-45.0, "-45 Bear", color = color.new(bearishColor, 78), linestyle = hline.style_dotted)
-hline(-75.0, "-75 Strong Bear", color = color.new(strongBearColor, 70), linestyle = hline.style_dotted)
+hline(-75.0, "-75 Strong Bear", color = color.new(bearishColor, 70), linestyle = hline.style_dotted)
 hline(-100.0, "Minimum", color = color.new(neutralColor, 100))
 
 bgcolor(showRegimeBackground ? color.new(regimeColor, regimeBackgroundTransparency) : na, title = "Context regime background")
@@ -580,82 +576,66 @@ plot(zonePreference, "Zone Preference", display = showResearchValues ? display.d
 plot(legacyScore, "Legacy Context Score", display = showResearchValues ? display.data_window : display.none)
 
 var table contextTable = table.new(
-     f_dashboardPosition(dashboardPositionInput),
+     position.top_right,
      3,
-     16,
-     bgcolor = panelColor,
-     frame_color = color.new(neonPurple, 35),
+     10,
+     bgcolor = color.new(panelColor, 10),
+     frame_color = color.new(borderColor, 35),
      frame_width = 1,
-     border_color = color.new(neutralColor, 88),
-     border_width = 1
-)
+     border_color = color.new(borderColor, 72),
+     border_width = 1)
+
+if barstate.isfirst
+    table.merge_cells(contextTable, 0, 0, 2, 0)
 
 if barstate.islast
-    table.clear(contextTable, 0, 0, 2, 15)
+    color invisible = color.new(panelColor, 100)
+    color rowBackground = showDashboard ? color.new(panelColor, 12) : invisible
+    color alternateBackground = showDashboard ? color.new(panelColor, 5) : invisible
+    color headerBackground = showDashboard ? color.new(brandColor, 18) : invisible
+    color hiddenText = color.new(textColor, 100)
     if showDashboard
-        color headerBackground = color.new(neonPurple, 12)
-        color rowBackground = color.new(panelColor, 3)
-        color alternateBackground = color.new(#18121F, 4)
-        f_tableCell(contextTable, 0, 0, "MERIDIAN CONTEXT", color.black, headerBackground, "Left")
-        f_tableCell(contextTable, 1, 0, "v0.2.1", color.black, headerBackground, "Right")
-        f_tableCell(contextTable, 2, 0, regimeText, color.black, headerBackground, "Right")
+        f_tableCell(contextTable, 0, 0, "Meridian -- Options Context", textColor, headerBackground, "Left")
         f_tableCell(contextTable, 0, 1, "Direction", neutralColor, rowBackground, "Left")
         f_tableCell(contextTable, 1, 1, f_scoreText(contextDirection), f_scoreColor(contextDirection), rowBackground, "Right")
         f_tableCell(contextTable, 2, 1, regimeText, regimeColor, rowBackground, "Right")
         f_tableCell(contextTable, 0, 2, "Confidence", neutralColor, alternateBackground, "Left")
-        f_tableCell(contextTable, 1, 2, na(contextConfidence) ? "n/a" : str.tostring(math.round(contextConfidence)), lightPurple, alternateBackground, "Right")
-        f_tableCell(contextTable, 2, 2, f_confidenceText(contextConfidence), lightPurple, alternateBackground, "Right")
+        f_tableCell(contextTable, 1, 2, na(contextConfidence) ? "n/a" : str.tostring(math.round(contextConfidence)), secondaryColor, alternateBackground, "Right")
+        f_tableCell(contextTable, 2, 2, f_confidenceText(contextConfidence), secondaryColor, alternateBackground, "Right")
         f_tableCell(contextTable, 0, 3, "Levels Bias", neutralColor, rowBackground, "Left")
         f_tableCell(contextTable, 1, 3, "", neutralColor, rowBackground, "Right")
         f_tableCell(contextTable, 2, 3, levelsBiasText, zonePreference > 0.0 ? bullishColor : zonePreference < 0.0 ? bearishColor : neutralColor, rowBackground, "Right")
+        f_tableCell(contextTable, 0, 4, "HTF", neutralColor, alternateBackground, "Left")
+        f_tableCell(contextTable, 1, 4, f_scoreText(htfScore), f_scoreColor(htfScore), alternateBackground, "Right")
+        f_tableCell(contextTable, 2, 4, htfBreadthText, f_scoreColor(htfScore), alternateBackground, "Right")
         if dashboardMode == "Detailed"
-            f_tableCell(contextTable, 0, 4, "Trend", neutralColor, alternateBackground, "Left")
-            f_tableCell(contextTable, 1, 4, f_scoreText(trendScore), f_scoreColor(trendScore), alternateBackground, "Right")
-            f_tableCell(contextTable, 2, 4, f_componentText(trendScore), f_scoreColor(trendScore), alternateBackground, "Right")
-            f_tableCell(contextTable, 0, 5, "Structure", neutralColor, rowBackground, "Left")
-            f_tableCell(contextTable, 1, 5, f_scoreText(structureScore), f_scoreColor(structureScore), rowBackground, "Right")
-            f_tableCell(contextTable, 2, 5, f_componentText(structureScore), f_scoreColor(structureScore), rowBackground, "Right")
-            f_tableCell(contextTable, 0, 6, "Momentum", neutralColor, alternateBackground, "Left")
-            f_tableCell(contextTable, 1, 6, f_scoreText(momentumScore), f_scoreColor(momentumScore), alternateBackground, "Right")
-            f_tableCell(contextTable, 2, 6, f_componentText(momentumScore), f_scoreColor(momentumScore), alternateBackground, "Right")
+            f_tableCell(contextTable, 0, 5, "Trend", neutralColor, rowBackground, "Left")
+            f_tableCell(contextTable, 1, 5, f_scoreText(trendScore), f_scoreColor(trendScore), rowBackground, "Right")
+            f_tableCell(contextTable, 2, 5, f_componentText(trendScore), f_scoreColor(trendScore), rowBackground, "Right")
+            f_tableCell(contextTable, 0, 6, "Structure", neutralColor, alternateBackground, "Left")
+            f_tableCell(contextTable, 1, 6, f_scoreText(structureScore), f_scoreColor(structureScore), alternateBackground, "Right")
+            f_tableCell(contextTable, 2, 6, f_componentText(structureScore), f_scoreColor(structureScore), alternateBackground, "Right")
             f_tableCell(contextTable, 0, 7, "Participation", neutralColor, rowBackground, "Left")
-            f_tableCell(contextTable, 1, 7, f_scoreText(participationScore), f_scoreColor(participationScore), rowBackground, "Right")
+            f_tableCell(contextTable, 1, 7, f_ratioText(barRvol), informationColor, rowBackground, "Right")
             f_tableCell(contextTable, 2, 7, f_componentText(participationScore), f_scoreColor(participationScore), rowBackground, "Right")
-            f_tableCell(contextTable, 0, 8, "Persistence", neutralColor, alternateBackground, "Left")
-            f_tableCell(contextTable, 1, 8, f_scoreText(persistenceScore), f_scoreColor(persistenceScore), alternateBackground, "Right")
-            f_tableCell(contextTable, 2, 8, f_componentText(persistenceScore), f_scoreColor(persistenceScore), alternateBackground, "Right")
-            f_tableCell(contextTable, 0, 9, "HTF Composite", neutralColor, rowBackground, "Left")
-            f_tableCell(contextTable, 1, 9, f_scoreText(htfScore), f_scoreColor(htfScore), rowBackground, "Right")
-            f_tableCell(contextTable, 2, 9, f_componentText(htfScore), f_scoreColor(htfScore), rowBackground, "Right")
-            f_tableCell(contextTable, 0, 10, "HTF Conviction", neutralColor, alternateBackground, "Left")
-            f_tableCell(contextTable, 1, 10, na(htfConviction) ? "n/a" : str.tostring(math.round(htfConviction)), lightPurple, alternateBackground, "Right")
-            f_tableCell(contextTable, 2, 10, htfBreadthText, f_scoreColor(htfScore), alternateBackground, "Right")
-            if showHigherTimeframeMatrix
-                f_tableCell(contextTable, 0, 11, "1H / 4H", neutralColor, rowBackground, "Left")
-                f_tableCell(contextTable, 1, 11, f_scoreText(htf1hScore) + " / " + f_scoreText(htf4hScore), neutralColor, rowBackground, "Right")
-                f_tableCell(contextTable, 2, 11, f_componentText(htf1hScore) + " / " + f_componentText(htf4hScore), f_scoreColor(htfTacticalScore), rowBackground, "Right")
-                f_tableCell(contextTable, 0, 12, "1D / 1W", neutralColor, alternateBackground, "Left")
-                f_tableCell(contextTable, 1, 12, f_scoreText(htf1dScore) + " / " + f_scoreText(htf1wScore), neutralColor, alternateBackground, "Right")
-                f_tableCell(contextTable, 2, 12, f_componentText(htf1dScore) + " / " + f_componentText(htf1wScore), f_scoreColor(htfMacroScore), alternateBackground, "Right")
-            f_tableCell(contextTable, 0, 13, "RVOL Bar / Cum", neutralColor, rowBackground, "Left")
-            f_tableCell(contextTable, 1, 13, f_ratioText(barRvol) + " / " + f_ratioText(cumulativeRvol), neutralColor, rowBackground, "Right")
-            f_tableCell(contextTable, 2, 13, f_rvolState(barRvol), not na(barRvol) and barRvol >= highRvolThreshold ? neonPurple : neutralColor, rowBackground, "Right")
-            f_tableCell(contextTable, 0, 14, "Volatility", neutralColor, alternateBackground, "Left")
-            f_tableCell(contextTable, 1, 14, na(volatilityScore) ? "n/a" : str.tostring(math.round(volatilityScore)), neutralColor, alternateBackground, "Right")
-            f_tableCell(contextTable, 2, 14, f_volatilityText(volatilityScore), volatilityScore >= 60.0 ? neonPurple : neutralColor, alternateBackground, "Right")
-            f_tableCell(contextTable, 0, 15, "Session", neutralColor, rowBackground, "Left")
-            f_tableCell(contextTable, 1, 15, inRth ? "RTH" : "OUTSIDE", inRth ? bullishColor : neutralColor, rowBackground, "Right")
-            f_tableCell(contextTable, 2, 15, openingRangeTimeframeWarning ? "OR: LOWER TF" : openingRangeFinalized ? "OR: FINAL" : inOpeningRange ? "OR: FORMING" : "OR: n/a", neutralColor, rowBackground, "Right")
+            f_tableCell(contextTable, 0, 8, "Volatility", neutralColor, alternateBackground, "Left")
+            f_tableCell(contextTable, 1, 8, na(volatilityScore) ? "n/a" : str.tostring(math.round(volatilityScore)), warningColor, alternateBackground, "Right")
+            f_tableCell(contextTable, 2, 8, f_volatilityText(volatilityScore), volatilityScore >= 60.0 ? warningColor : neutralColor, alternateBackground, "Right")
+            f_tableCell(contextTable, 0, 9, "Data", neutralColor, rowBackground, "Left")
+            f_tableCell(contextTable, 1, 9, inRth ? "RTH" : "OUTSIDE", inRth ? bullishColor : neutralColor, rowBackground, "Right")
+            f_tableCell(contextTable, 2, 9, dataState, staleData ? warningColor : dataState == "LIVE" ? informationColor : neutralColor, rowBackground, "Right")
         else
-            f_tableCell(contextTable, 0, 4, "HTF", neutralColor, alternateBackground, "Left")
-            f_tableCell(contextTable, 1, 4, f_scoreText(htfScore), f_scoreColor(htfScore), alternateBackground, "Right")
-            f_tableCell(contextTable, 2, 4, na(htfConviction) ? "n/a" : "Q " + str.tostring(math.round(htfConviction)) + " · " + htfBreadthText, f_scoreColor(htfScore), alternateBackground, "Right")
-            f_tableCell(contextTable, 0, 5, "RVOL", neutralColor, rowBackground, "Left")
-            f_tableCell(contextTable, 1, 5, f_ratioText(barRvol), neutralColor, rowBackground, "Right")
-            f_tableCell(contextTable, 2, 5, f_rvolState(barRvol), not na(barRvol) and barRvol >= highRvolThreshold ? neonPurple : neutralColor, rowBackground, "Right")
-            f_tableCell(contextTable, 0, 6, "Volatility", neutralColor, alternateBackground, "Left")
-            f_tableCell(contextTable, 1, 6, na(volatilityScore) ? "n/a" : str.tostring(math.round(volatilityScore)), neutralColor, alternateBackground, "Right")
-            f_tableCell(contextTable, 2, 6, f_volatilityText(volatilityScore), volatilityScore >= 60.0 ? neonPurple : neutralColor, alternateBackground, "Right")
+            for row = 5 to 8
+                f_tableCell(contextTable, 0, row, "", hiddenText, invisible, "Left")
+                f_tableCell(contextTable, 1, row, "", hiddenText, invisible, "Right")
+                f_tableCell(contextTable, 2, row, "", hiddenText, invisible, "Right")
+            f_tableCell(contextTable, 0, 9, "Data", neutralColor, rowBackground, "Left")
+            f_tableCell(contextTable, 1, 9, inRth ? "RTH" : "OUTSIDE", inRth ? bullishColor : neutralColor, rowBackground, "Right")
+            f_tableCell(contextTable, 2, 9, dataState, staleData ? warningColor : dataState == "LIVE" ? informationColor : neutralColor, rowBackground, "Right")
+    else
+        for row = 0 to 9
+            for col = 0 to 2
+                table.cell(contextTable, col, row, "", bgcolor = invisible, text_color = hiddenText)
 
 bool confirmedBar = barstate.isconfirmed
 bool enteredStrongBull = enableAlerts and confirmedBar and regimeState == REGIME_STRONG_BULL and regimeState[1] != REGIME_STRONG_BULL

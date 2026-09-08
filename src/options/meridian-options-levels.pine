@@ -1,6 +1,6 @@
 //@version=6
 // SPDX-License-Identifier: MPL-2.0
-// Meridian — Options Levels · v0.2.1
+// Meridian — Options Levels · v0.3.0
 
 indicator(
      title = "Meridian - Options Levels",
@@ -19,6 +19,8 @@ string GROUP_REACTION = "05. Reaction Model"
 string GROUP_EVENT = "06. Event AVWAP"
 string GROUP_VWAP = "07. VWAP"
 string GROUP_ALERTS = "08. Dashboard & Alerts"
+string GROUP_THEME = "09. Theme"
+string GROUP_RESEARCH = "10. Research / Debug"
 
 string sessionTimezone = input.string("America/New_York", "Session timezone", group = GROUP_SESSIONS)
 string rthInput = input.session("0930-1600", "Regular session", group = GROUP_SESSIONS)
@@ -33,16 +35,14 @@ string displayMode = input.string(
      group = GROUP_DISPLAY
 )
 bool showZoneText = input.bool(true, "Show zone text", group = GROUP_DISPLAY)
-bool showDashboard = input.bool(true, "Show compact dashboard", group = GROUP_DISPLAY)
+bool showDashboard = input.bool(true, "Show dashboard", group = GROUP_DISPLAY)
+string dashboardSizeInput = input.string("Small", "Dashboard text size", options = ["Tiny", "Small", "Normal"], group = GROUP_DISPLAY)
 int zoneBackBars = input.int(12, "Zone history bars", minval = 1, maxval = 250, group = GROUP_DISPLAY)
 int zoneForwardBars = input.int(40, "Zone projection bars", minval = 5, maxval = 250, group = GROUP_DISPLAY)
 bool showEdgeSignals = input.bool(true, "Show buy / sell edge zones", group = GROUP_DISPLAY)
 float edgeSignalMinimumActionability = input.float(55.0, "Edge zone minimum actionability", minval = 0.0, maxval = 100.0, step = 1.0, group = GROUP_DISPLAY)
 float edgeSignalHeightPct = input.float(0.20, "Edge zone height (% of parent zone)", minval = 0.05, maxval = 0.50, step = 0.01, group = GROUP_DISPLAY)
 bool showOpeningRangeBox = input.bool(true, "Highlight opening-range window", group = GROUP_DISPLAY)
-color resistanceColor = input.color(#F87171, "Resistance zone", group = GROUP_DISPLAY)
-color supportColor = input.color(#2DD4BF, "Support zone", group = GROUP_DISPLAY)
-color neutralColor = input.color(#A1A1AA, "Neutral / broken state", group = GROUP_DISPLAY)
 
 int atrLength = input.int(14, "Confirmed daily ATR length", minval = 5, maxval = 100, group = GROUP_ENGINE)
 float maxDistanceAtr = input.float(2.5, "Maximum candidate distance (daily ATR)", minval = 0.5, maxval = 10.0, step = 0.25, group = GROUP_ENGINE)
@@ -72,6 +72,10 @@ bool usePremarket = input.bool(true, "Premarket high / low", group = GROUP_SOURC
 bool useOpeningRange = input.bool(true, "Finalized opening range", group = GROUP_SOURCES)
 bool useRthOpen = input.bool(true, "RTH open", group = GROUP_SOURCES)
 bool usePivots = input.bool(true, "Confirmed swing pivots", group = GROUP_SOURCES)
+bool useEqualHighLow = input.bool(true, "Confirmed equal highs / lows", group = GROUP_SOURCES)
+float equalLevelToleranceAtr = input.float(0.025, "Equal-level tolerance (daily ATR)", minval = 0.005, maxval = 0.10, step = 0.005, group = GROUP_SOURCES)
+int equalLevelMinimumTicks = input.int(3, "Equal-level minimum tolerance (ticks)", minval = 1, maxval = 20, group = GROUP_SOURCES)
+int equalLevelMaxAgeBars = input.int(240, "Equal-level maximum age (bars)", minval = 20, maxval = 1500, group = GROUP_SOURCES)
 int pivotLeftBars = input.int(3, "Pivot left bars", minval = 1, maxval = 20, group = GROUP_SOURCES)
 int pivotRightBars = input.int(3, "Pivot right bars", minval = 1, maxval = 20, group = GROUP_SOURCES)
 int maxPivotRecords = input.int(36, "Maximum pivot records", minval = 10, maxval = 60, group = GROUP_SOURCES)
@@ -92,9 +96,9 @@ int touchMinimumTicks = input.int(2, "Touch tolerance (ticks)", minval = 1, maxv
 float touchAtrFraction = input.float(0.025, "Touch tolerance (daily ATR)", minval = 0.005, maxval = 0.15, step = 0.005, group = GROUP_REACTION)
 
 string eventAnchorMode = input.string(
-     "Automatic earnings",
+     "Disabled",
      "Event AVWAP anchor",
-     options = ["Automatic earnings", "Manual timestamp", "Disabled"],
+     options = ["Disabled", "Manual timestamp", "Automatic earnings"],
      group = GROUP_EVENT
 )
 int manualEventTime = input.time(0, "Manual event timestamp", group = GROUP_EVENT)
@@ -111,7 +115,21 @@ float vwapBand2Multiplier = input.float(2.0, "Band 2 multiplier", minval = 0.1, 
 bool showEmas = input.bool(false, "Show 9 / 21 EMA in Legacy / Debug", group = GROUP_VWAP)
 
 bool enableAlerts = input.bool(true, "Enable transition alerts", group = GROUP_ALERTS)
-bool showResearchValues = input.bool(false, "Show research values in Data Window", group = GROUP_ALERTS)
+
+color brandColor = input.color(#8B5CF6, "Brand / header", group = GROUP_THEME)
+color supportColor = input.color(#2DD4BF, "Support / bullish", group = GROUP_THEME)
+color resistanceColor = input.color(#F87171, "Resistance / bearish", group = GROUP_THEME)
+color informationColor = input.color(#38BDF8, "Information", group = GROUP_THEME)
+color neutralColor = input.color(#94A3B8, "Neutral", group = GROUP_THEME)
+color pendingColor = input.color(#A1A1AA, "Pending / developing", group = GROUP_THEME)
+color warningColor = input.color(#FBBF24, "Warning", group = GROUP_THEME)
+color panelColor = input.color(#090E17, "HUD background", group = GROUP_THEME)
+color borderColor = input.color(#334155, "HUD border", group = GROUP_THEME)
+color textColor = input.color(#F8FAFC, "HUD text", group = GROUP_THEME)
+
+bool showResearchValues = input.bool(false, "Show research values in Data Window", group = GROUP_RESEARCH)
+bool showPotentialZones = input.bool(false, "Show potential reaction zones", group = GROUP_RESEARCH)
+float potentialZoneMinimumStrength = input.float(35.0, "Potential-zone minimum strength", minval = 0.0, maxval = 100.0, step = 1.0, group = GROUP_RESEARCH)
 
 int SRC_PDH = 1
 int SRC_PDL = 2
@@ -131,6 +149,8 @@ int SRC_VWAP = 15
 int SRC_VWAP_BAND = 16
 int SRC_EVENT_AVWAP = 17
 int SRC_ATR_PROJECTION = 18
+int SRC_EQH = 19
+int SRC_EQL = 20
 
 int STATE_DISTANT = 1
 int STATE_APPROACHING = 2
@@ -248,6 +268,9 @@ type FlipWatch
 f_clamp(float x, float lo, float hi) =>
     math.max(lo, math.min(hi, x))
 
+f_textSize(string sizeText) =>
+    sizeText == "Tiny" ? size.tiny : sizeText == "Normal" ? size.normal : size.small
+
 f_positiveSat(float x) =>
     x <= 0.0 ? 0.0 : 100.0 * x / (x + 0.5)
 
@@ -284,6 +307,8 @@ f_sourceName(int sourceType) =>
         SRC_VWAP_BAND => "VWAP BAND"
         SRC_EVENT_AVWAP => "EVENT AVWAP"
         SRC_ATR_PROJECTION => "ATR PROJ"
+        SRC_EQH => "EQH"
+        SRC_EQL => "EQL"
         => "LEVEL"
 
 f_sourceFamily(int sourceType) =>
@@ -306,6 +331,8 @@ f_sourceFamily(int sourceType) =>
         SRC_VWAP_BAND => "VWAP"
         SRC_EVENT_AVWAP => "EVENT"
         SRC_ATR_PROJECTION => "PROJECTION"
+        SRC_EQH => "LIQUIDITY"
+        SRC_EQL => "LIQUIDITY"
         => "OTHER"
 
 f_sourceBaseRecency(int sourceType) =>
@@ -318,7 +345,29 @@ f_sourceBaseRecency(int sourceType) =>
         SRC_EVENT_AVWAP => 100.0
         SRC_PIVOT_HIGH => 100.0
         SRC_PIVOT_LOW => 100.0
+        SRC_EQH => 92.0
+        SRC_EQL => 92.0
         => 100.0
+
+f_latestEqualLevel(array<PivotRecord> source, int polarity, float tolerance, int maxAgeBars) =>
+    float level = na
+    int knownBar = na
+    int originBar = na
+    int count = source.size()
+    if count >= 2
+        for i = count - 1 to 1
+            PivotRecord recent = source.get(i)
+            if recent.polarity == polarity and bar_index - recent.knownBar <= maxAgeBars
+                for j = i - 1 to 0
+                    PivotRecord older = source.get(j)
+                    if older.polarity == polarity and bar_index - older.knownBar <= maxAgeBars and math.abs(recent.price - older.price) <= tolerance
+                        level := (recent.price + older.price) * 0.5
+                        knownBar := math.max(recent.knownBar, older.knownBar)
+                        originBar := math.min(recent.pivotBar, older.pivotBar)
+                        break
+            if not na(level)
+                break
+    [level, knownBar, originBar]
 
 f_reactionMetrics(float level, int knownBar) =>
     float reactionSum = 0.0
@@ -548,6 +597,19 @@ f_bestClusterIndex(array<Cluster> clusters, int polarity, FlipWatch blockedWatch
                 bestIndex := i
     bestIndex
 
+f_bestPotentialClusterIndex(array<Cluster> clusters, int polarity) =>
+    int bestIndex = -1
+    float bestActionability = -1.0
+    if clusters.size() > 0
+        for [i, cluster] in clusters
+            bool sideMatch = polarity == 1 ? cluster.center < close : cluster.center > close
+            bool polarityMatch = f_clusterPolarityMatch(cluster, polarity)
+            bool potentialStrength = cluster.strength >= potentialZoneMinimumStrength and cluster.strength < minimumZoneStrength
+            if sideMatch and polarityMatch and potentialStrength and cluster.actionability > bestActionability
+                bestActionability := cluster.actionability
+                bestIndex := i
+    bestIndex
+
 f_matchingClusterIndex(array<Cluster> clusters, ActiveZone zone, float tolerance) =>
     int matchIndex = -1
     float nearest = 1e12
@@ -707,10 +769,6 @@ f_zoneBorderColor(int polarity, int state) =>
 f_zoneText(ActiveZone zone) =>
     string side = zone.polarity == 1 ? "SUPPORT" : "RESISTANCE"
     side + " | " + f_stateText(zone.state)
-
-f_zoneDistanceAtr(ActiveZone zone, float atr) =>
-    float distance = not zone.valid ? na : close < zone.low ? zone.low - close : close > zone.high ? close - zone.high : 0.0
-    not na(distance) ? distance / math.max(atr, syminfo.mintick) : na
 
 var float currentDayHigh = na
 var float currentDayLow = na
@@ -969,6 +1027,8 @@ while pivots.size() > maxPivotRecords
 
 var ActiveZone supportZone = f_emptyZone()
 var ActiveZone resistanceZone = f_emptyZone()
+var ActiveZone potentialSupportZone = f_emptyZone()
+var ActiveZone potentialResistanceZone = f_emptyZone()
 var FlipWatch supportBreakWatch = f_emptyFlipWatch()
 var FlipWatch resistanceBreakWatch = f_emptyFlipWatch()
 
@@ -1140,6 +1200,12 @@ if rebuildClusters
         for pivot in pivots
             int sourceType = pivot.polarity == -1 ? SRC_PIVOT_HIGH : SRC_PIVOT_LOW
             f_addCandidate(registry, pivot.price, pivot.baseWeight, sourceType, pivot.polarity, pivot.pivotBar, pivot.knownBar, pivot.originImpulse, pivot.originVolume, na, true, normalizationAtr, maximumCandidateDistance)
+    if useEqualHighLow and pivots.size() >= 2
+        float equalTolerance = math.max(equalLevelMinimumTicks * syminfo.mintick, normalizationAtr * equalLevelToleranceAtr)
+        [equalHigh, equalHighKnownBar, equalHighOriginBar] = f_latestEqualLevel(pivots, -1, equalTolerance, equalLevelMaxAgeBars)
+        [equalLow, equalLowKnownBar, equalLowOriginBar] = f_latestEqualLevel(pivots, 1, equalTolerance, equalLevelMaxAgeBars)
+        f_addCandidate(registry, equalHigh, 70.0, SRC_EQH, -1, equalHighOriginBar, equalHighKnownBar, na, na, 92.0, true, normalizationAtr, maximumCandidateDistance)
+        f_addCandidate(registry, equalLow, 70.0, SRC_EQL, 1, equalLowOriginBar, equalLowKnownBar, na, na, 92.0, true, normalizationAtr, maximumCandidateDistance)
 
     array<Cluster> clusters = f_buildClusters(registry, clusterTolerance, normalizationAtr)
     int supportMatchIndex = f_matchingClusterIndex(clusters, supportZone, clusterTolerance)
@@ -1161,6 +1227,10 @@ if rebuildClusters
 
     int bestSupportIndex = f_bestClusterIndex(clusters, 1, resistanceBreakWatch, clusterTolerance)
     int bestResistanceIndex = f_bestClusterIndex(clusters, -1, supportBreakWatch, clusterTolerance)
+    int potentialSupportIndex = f_bestPotentialClusterIndex(clusters, 1)
+    int potentialResistanceIndex = f_bestPotentialClusterIndex(clusters, -1)
+    potentialSupportZone := potentialSupportIndex >= 0 ? f_zoneFromCluster(clusters.get(potentialSupportIndex), 1, STATE_DISTANT, bar_index) : f_emptyZone()
+    potentialResistanceZone := potentialResistanceIndex >= 0 ? f_zoneFromCluster(clusters.get(potentialResistanceIndex), -1, STATE_DISTANT, bar_index) : f_emptyZone()
 
     if bestSupportIndex >= 0
         Cluster bestSupport = clusters.get(bestSupportIndex)
@@ -1192,36 +1262,66 @@ bool showKeyReferences = displayMode == "Zones + Key References" or displayMode 
 bool showLegacy = displayMode == "Legacy / Debug"
 bool showCurrentVwapBar = inRth
 
-plot(showKeyReferences and usePriorDay ? previousDayHigh : na, "PDH", color.new(#E4E4E7, 35), 1, plot.style_linebr)
-plot(showKeyReferences and usePriorDay ? previousDayLow : na, "PDL", color.new(#E4E4E7, 35), 1, plot.style_linebr)
-plot(showKeyReferences and usePriorDay ? previousDayClose : na, "PDC", color.new(#7DD3FC, 45), 1, plot.style_linebr)
-plot(showKeyReferences and usePriorWeek ? previousWeekHigh : na, "PWH", color.new(#D4D4D8, 55), 1, plot.style_linebr)
-plot(showKeyReferences and usePriorWeek ? previousWeekLow : na, "PWL", color.new(#D4D4D8, 55), 1, plot.style_linebr)
-plot(showKeyReferences and usePremarket ? premarketHigh : na, "PMH", color.new(#67E8F9, 45), 1, plot.style_linebr)
-plot(showKeyReferences and usePremarket ? premarketLow : na, "PML", color.new(#67E8F9, 45), 1, plot.style_linebr)
-plot(showKeyReferences and useOpeningRange ? openingRangeHigh : na, "ORH", color.new(#FBBF24, 40), 1, plot.style_linebr)
-plot(showKeyReferences and useOpeningRange ? openingRangeLow : na, "ORL", color.new(#FBBF24, 40), 1, plot.style_linebr)
-plot(showKeyReferences and useRthOpen ? currentSessionOpen : na, "RTH Open", color.new(#BAE6FD, 50), 1, plot.style_linebr)
+plot(showKeyReferences and usePriorDay ? previousDayHigh : na, "PDH", color.new(neutralColor, 35), 1, plot.style_linebr)
+plot(showKeyReferences and usePriorDay ? previousDayLow : na, "PDL", color.new(neutralColor, 35), 1, plot.style_linebr)
+plot(showKeyReferences and usePriorDay ? previousDayClose : na, "PDC", color.new(informationColor, 45), 1, plot.style_linebr)
+plot(showKeyReferences and usePriorWeek ? previousWeekHigh : na, "PWH", color.new(neutralColor, 55), 1, plot.style_linebr)
+plot(showKeyReferences and usePriorWeek ? previousWeekLow : na, "PWL", color.new(neutralColor, 55), 1, plot.style_linebr)
+plot(showKeyReferences and usePremarket ? premarketHigh : na, "PMH", color.new(informationColor, 45), 1, plot.style_linebr)
+plot(showKeyReferences and usePremarket ? premarketLow : na, "PML", color.new(informationColor, 45), 1, plot.style_linebr)
+plot(showKeyReferences and useOpeningRange ? openingRangeHigh : na, "ORH", color.new(warningColor, 40), 1, plot.style_linebr)
+plot(showKeyReferences and useOpeningRange ? openingRangeLow : na, "ORL", color.new(warningColor, 40), 1, plot.style_linebr)
+plot(showKeyReferences and useRthOpen ? currentSessionOpen : na, "RTH Open", color.new(informationColor, 50), 1, plot.style_linebr)
 
 plot(showVwap and showCurrentVwapBar ? sessionVwap : na, "RTH VWAP", #C4B5FD, 2, plot.style_linebr)
-plot(showVwap and showVwapBand1 and showCurrentVwapBar ? upperBand1 : na, "VWAP +1 stdev", color.new(#A78BFA, 35), 1, plot.style_linebr)
-plot(showVwap and showVwapBand1 and showCurrentVwapBar ? lowerBand1 : na, "VWAP -1 stdev", color.new(#A78BFA, 35), 1, plot.style_linebr)
-plot(showVwap and showVwapBand2 and showCurrentVwapBar ? upperBand2 : na, "VWAP +2 stdev", color.new(#A78BFA, 55), 1, plot.style_linebr)
-plot(showVwap and showVwapBand2 and showCurrentVwapBar ? lowerBand2 : na, "VWAP -2 stdev", color.new(#A78BFA, 55), 1, plot.style_linebr)
+plot(showVwap and showVwapBand1 and showCurrentVwapBar ? upperBand1 : na, "VWAP +1 stdev", color.new(brandColor, 35), 1, plot.style_linebr)
+plot(showVwap and showVwapBand1 and showCurrentVwapBar ? lowerBand1 : na, "VWAP -1 stdev", color.new(brandColor, 35), 1, plot.style_linebr)
+plot(showVwap and showVwapBand2 and showCurrentVwapBar ? upperBand2 : na, "VWAP +2 stdev", color.new(brandColor, 55), 1, plot.style_linebr)
+plot(showVwap and showVwapBand2 and showCurrentVwapBar ? lowerBand2 : na, "VWAP -2 stdev", color.new(brandColor, 55), 1, plot.style_linebr)
 plot(showLegacy and showEmas ? fastEma : na, "EMA 9", color.new(#38BDF8, 25), 1)
-plot(showLegacy and showEmas ? slowEma : na, "EMA 21", color.new(#FDE68A, 25), 1)
-plot(showLegacy and eventCandidateValid ? eventAvwap : na, "Event AVWAP", color.new(#F472B6, 15), 2, plot.style_linebr)
-plot(showLegacy and gapActive and not gapFilled ? gapHigh : na, "Active Gap High", color.new(#FB7185, 65), 1, plot.style_linebr)
-plot(showLegacy and gapActive and not gapFilled ? gapLow : na, "Active Gap Low", color.new(#34D399, 65), 1, plot.style_linebr)
+plot(showLegacy and showEmas ? slowEma : na, "EMA 21", color.new(warningColor, 25), 1)
+plot(showLegacy and eventCandidateValid ? eventAvwap : na, "Event AVWAP", color.new(brandColor, 15), 2, plot.style_linebr)
+plot(showLegacy and gapActive and not gapFilled ? gapHigh : na, "Active Gap High", color.new(resistanceColor, 65), 1, plot.style_linebr)
+plot(showLegacy and gapActive and not gapFilled ? gapLow : na, "Active Gap Low", color.new(supportColor, 65), 1, plot.style_linebr)
 plot(showLegacy and gapActive and not gapFilled ? gapMid : na, "Active Gap Mid", color.new(#FBBF24, 70), 1, plot.style_linebr)
 plot(showLegacy and gapActive and not gapFilled ? gapUnfilledBoundary : na, "Active Gap Unfilled Boundary", color.new(#F8FAFC, 55), 1, plot.style_linebr)
 
+var box potentialSupportBox = na
+var box potentialResistanceBox = na
 var box openingRangeBox = na
 var box supportBox = na
 var box resistanceBox = na
 var box buyEdgeBox = na
 var box sellEdgeBox = na
 if barstate.islast
+    if showPotentialZones and potentialSupportZone.valid
+        int leftIndex = math.max(potentialSupportZone.selectedBar, bar_index - zoneBackBars)
+        int rightIndex = bar_index + zoneForwardBars
+        if na(potentialSupportBox)
+            potentialSupportBox := box.new(left = leftIndex, top = potentialSupportZone.high, right = rightIndex, bottom = potentialSupportZone.low, xloc = xloc.bar_index, border_color = color.new(pendingColor, 72), border_width = 1, border_style = line.style_dotted, bgcolor = color.new(pendingColor, 93), text = "POTENTIAL SUPPORT", text_size = size.tiny, text_color = color.new(pendingColor, 10), text_halign = text.align_right, text_valign = text.align_center, text_font_family = font.family_monospace)
+        else
+            potentialSupportBox.set_left(leftIndex)
+            potentialSupportBox.set_right(rightIndex)
+            potentialSupportBox.set_top(potentialSupportZone.high)
+            potentialSupportBox.set_bottom(potentialSupportZone.low)
+    else if not na(potentialSupportBox)
+        potentialSupportBox.delete()
+        potentialSupportBox := na
+
+    if showPotentialZones and potentialResistanceZone.valid
+        int leftIndex = math.max(potentialResistanceZone.selectedBar, bar_index - zoneBackBars)
+        int rightIndex = bar_index + zoneForwardBars
+        if na(potentialResistanceBox)
+            potentialResistanceBox := box.new(left = leftIndex, top = potentialResistanceZone.high, right = rightIndex, bottom = potentialResistanceZone.low, xloc = xloc.bar_index, border_color = color.new(pendingColor, 72), border_width = 1, border_style = line.style_dotted, bgcolor = color.new(pendingColor, 93), text = "POTENTIAL RESISTANCE", text_size = size.tiny, text_color = color.new(pendingColor, 10), text_halign = text.align_right, text_valign = text.align_center, text_font_family = font.family_monospace)
+        else
+            potentialResistanceBox.set_left(leftIndex)
+            potentialResistanceBox.set_right(rightIndex)
+            potentialResistanceBox.set_top(potentialResistanceZone.high)
+            potentialResistanceBox.set_bottom(potentialResistanceZone.low)
+    else if not na(potentialResistanceBox)
+        potentialResistanceBox.delete()
+        potentialResistanceBox := na
+
     if showOpeningRangeBox and useOpeningRange and not na(openingRangeStartBar) and not na(openingRangeHigh) and not na(openingRangeLow)
         int orLeft = openingRangeStartBar
         int orRight = openingRangeFinalized and not na(openingRangeKnownBar) ? openingRangeKnownBar : bar_index
@@ -1232,17 +1332,17 @@ if barstate.islast
                  right = orRight,
                  bottom = openingRangeLow,
                  xloc = xloc.bar_index,
-                 border_color = color.new(#FBBF24, 55),
+                 border_color = color.new(warningColor, 55),
                  border_width = 1,
-                 bgcolor = color.new(#FBBF24, 90)
+                 bgcolor = color.new(warningColor, 90)
             )
         else
             openingRangeBox.set_left(orLeft)
             openingRangeBox.set_right(orRight)
             openingRangeBox.set_top(openingRangeHigh)
             openingRangeBox.set_bottom(openingRangeLow)
-            openingRangeBox.set_border_color(color.new(#FBBF24, 55))
-            openingRangeBox.set_bgcolor(color.new(#FBBF24, 90))
+            openingRangeBox.set_border_color(color.new(warningColor, 55))
+            openingRangeBox.set_bgcolor(color.new(warningColor, 90))
     else if not na(openingRangeBox)
         openingRangeBox.delete()
         openingRangeBox := na
@@ -1295,12 +1395,12 @@ if barstate.islast
                  right = rightIndex,
                  bottom = supportZone.low,
                  xloc = xloc.bar_index,
-                 border_color = color.new(#14B8A6, 0),
+                 border_color = color.new(supportColor, 0),
                  border_width = 1,
-                 bgcolor = color.new(#14B8A6, 72),
+                 bgcolor = color.new(supportColor, 72),
                  text = showZoneText ? "BUY" : "",
                  text_size = size.tiny,
-                 text_color = color.new(#CCFBF1, 0),
+                 text_color = color.new(textColor, 0),
                  text_halign = text.align_right,
                  text_valign = text.align_center,
                  text_wrap = text.wrap_none,
@@ -1311,10 +1411,10 @@ if barstate.islast
             buyEdgeBox.set_right(rightIndex)
             buyEdgeBox.set_top(edgeTop)
             buyEdgeBox.set_bottom(supportZone.low)
-            buyEdgeBox.set_border_color(color.new(#14B8A6, 0))
-            buyEdgeBox.set_bgcolor(color.new(#14B8A6, 72))
+            buyEdgeBox.set_border_color(color.new(supportColor, 0))
+            buyEdgeBox.set_bgcolor(color.new(supportColor, 72))
             buyEdgeBox.set_text(showZoneText ? "BUY" : "")
-            buyEdgeBox.set_text_color(color.new(#CCFBF1, 0))
+            buyEdgeBox.set_text_color(color.new(textColor, 0))
     else if not na(buyEdgeBox)
         buyEdgeBox.delete()
         buyEdgeBox := na
@@ -1368,12 +1468,12 @@ if barstate.islast
                  right = rightIndex,
                  bottom = edgeBottom,
                  xloc = xloc.bar_index,
-                 border_color = color.new(#FB7185, 0),
+                 border_color = color.new(resistanceColor, 0),
                  border_width = 1,
-                 bgcolor = color.new(#FB7185, 72),
+                 bgcolor = color.new(resistanceColor, 72),
                  text = showZoneText ? "SELL" : "",
                  text_size = size.tiny,
-                 text_color = color.new(#FFE4E6, 0),
+                 text_color = color.new(textColor, 0),
                  text_halign = text.align_right,
                  text_valign = text.align_center,
                  text_wrap = text.wrap_none,
@@ -1384,58 +1484,46 @@ if barstate.islast
             sellEdgeBox.set_right(rightIndex)
             sellEdgeBox.set_top(resistanceZone.high)
             sellEdgeBox.set_bottom(edgeBottom)
-            sellEdgeBox.set_border_color(color.new(#FB7185, 0))
-            sellEdgeBox.set_bgcolor(color.new(#FB7185, 72))
+            sellEdgeBox.set_border_color(color.new(resistanceColor, 0))
+            sellEdgeBox.set_bgcolor(color.new(resistanceColor, 72))
             sellEdgeBox.set_text(showZoneText ? "SELL" : "")
-            sellEdgeBox.set_text_color(color.new(#FFE4E6, 0))
+            sellEdgeBox.set_text_color(color.new(textColor, 0))
     else if not na(sellEdgeBox)
         sellEdgeBox.delete()
         sellEdgeBox := na
 
 var table dashboard = na
 if barstate.isfirst and showDashboard
-    dashboard := table.new(position.top_right, 2, 5, bgcolor = color.new(#090E17, 8), frame_color = color.new(#334155, 30), frame_width = 1)
+    dashboard := table.new(position.top_right, 2, 5, bgcolor = color.new(panelColor, 10), frame_color = color.new(borderColor, 35), frame_width = 1, border_color = color.new(borderColor, 70), border_width = 1)
+    table.merge_cells(dashboard, 0, 0, 1, 0)
 if barstate.islast and showDashboard and not na(dashboard)
-    string resistanceText = resistanceZone.valid ? str.tostring(resistanceZone.low, format.mintick) + "-" + str.tostring(resistanceZone.high, format.mintick) : "n/a"
-    string supportText = supportZone.valid ? str.tostring(supportZone.low, format.mintick) + "-" + str.tostring(supportZone.high, format.mintick) : "n/a"
+    string resistanceText = resistanceZone.valid ? str.tostring(resistanceZone.low, format.mintick) + "–" + str.tostring(resistanceZone.high, format.mintick) : "n/a"
+    string supportText = supportZone.valid ? str.tostring(supportZone.low, format.mintick) + "–" + str.tostring(supportZone.high, format.mintick) : "n/a"
     string nearestState = "n/a"
+    color nearestColor = neutralColor
     if supportZone.valid and resistanceZone.valid
-        nearestState := math.abs(close - supportZone.center) <= math.abs(resistanceZone.center - close) ? "S " + f_stateText(supportZone.state) : "R " + f_stateText(resistanceZone.state)
+        bool supportNearest = math.abs(close - supportZone.center) <= math.abs(resistanceZone.center - close)
+        nearestState := (supportNearest ? "SUPPORT · " + f_stateText(supportZone.state) : "RESISTANCE · " + f_stateText(resistanceZone.state))
+        nearestColor := supportNearest ? supportColor : resistanceColor
     else if supportZone.valid
-        nearestState := "S " + f_stateText(supportZone.state)
+        nearestState := "SUPPORT · " + f_stateText(supportZone.state)
+        nearestColor := supportColor
     else if resistanceZone.valid
-        nearestState := "R " + f_stateText(resistanceZone.state)
-    table.cell(dashboard, 0, 0, "MERIDIAN LEVELS", text_color = #F8FAFC, text_size = size.small)
-    table.cell(dashboard, 1, 0, "v0.2.1", text_color = #94A3B8, text_size = size.small)
-    table.cell(dashboard, 0, 1, "Resistance", text_color = resistanceColor, text_size = size.small)
-    table.cell(dashboard, 1, 1, resistanceText, text_color = #F8FAFC, text_size = size.small)
-    table.cell(dashboard, 0, 2, "Support", text_color = supportColor, text_size = size.small)
-    table.cell(dashboard, 1, 2, supportText, text_color = #F8FAFC, text_size = size.small)
-    table.cell(dashboard, 0, 3, "State", text_color = #94A3B8, text_size = size.small)
-    table.cell(dashboard, 1, 3, nearestState, text_color = #F8FAFC, text_size = size.small)
-    table.cell(dashboard, 0, 4, "Daily ATR", text_color = #94A3B8, text_size = size.small)
-    table.cell(dashboard, 1, 4, str.tostring(normalizationAtr, format.mintick), text_color = #F8FAFC, text_size = size.small)
-
-var table debugDashboard = na
-if barstate.isfirst and showDashboard and showLegacy
-    debugDashboard := table.new(position.bottom_right, 2, 6, bgcolor = color.new(#090E17, 8), frame_color = color.new(#334155, 30), frame_width = 1)
-if barstate.islast and showDashboard and showLegacy and not na(debugDashboard)
-    string rMetrics = resistanceZone.valid ? "Str " + str.tostring(math.round(resistanceZone.strength)) + " | Act " + str.tostring(math.round(resistanceZone.actionability)) + " | Dist " + str.tostring(f_zoneDistanceAtr(resistanceZone, normalizationAtr), "#.##") + "A" : "n/a"
-    string rReaction = resistanceZone.valid ? "Rx " + (na(resistanceZone.reactionQuality) ? "n/a" : str.tostring(math.round(resistanceZone.reactionQuality))) + " | Mean " + str.tostring(math.round(resistanceZone.weightedMean)) + " | Div " + str.tostring(resistanceZone.diversityCount) : "n/a"
-    string sMetrics = supportZone.valid ? "Str " + str.tostring(math.round(supportZone.strength)) + " | Act " + str.tostring(math.round(supportZone.actionability)) + " | Dist " + str.tostring(f_zoneDistanceAtr(supportZone, normalizationAtr), "#.##") + "A" : "n/a"
-    string sReaction = supportZone.valid ? "Rx " + (na(supportZone.reactionQuality) ? "n/a" : str.tostring(math.round(supportZone.reactionQuality))) + " | Mean " + str.tostring(math.round(supportZone.weightedMean)) + " | Div " + str.tostring(supportZone.diversityCount) : "n/a"
-    table.cell(debugDashboard, 0, 0, "R SCORE", text_color = resistanceColor, text_size = size.tiny)
-    table.cell(debugDashboard, 1, 0, rMetrics, text_color = #F8FAFC, text_size = size.tiny)
-    table.cell(debugDashboard, 0, 1, "R REACTION", text_color = resistanceColor, text_size = size.tiny)
-    table.cell(debugDashboard, 1, 1, rReaction, text_color = #F8FAFC, text_size = size.tiny)
-    table.cell(debugDashboard, 0, 2, "R SOURCES", text_color = resistanceColor, text_size = size.tiny)
-    table.cell(debugDashboard, 1, 2, resistanceZone.valid ? resistanceZone.sources : "n/a", text_color = #F8FAFC, text_size = size.tiny)
-    table.cell(debugDashboard, 0, 3, "S SCORE", text_color = supportColor, text_size = size.tiny)
-    table.cell(debugDashboard, 1, 3, sMetrics, text_color = #F8FAFC, text_size = size.tiny)
-    table.cell(debugDashboard, 0, 4, "S REACTION", text_color = supportColor, text_size = size.tiny)
-    table.cell(debugDashboard, 1, 4, sReaction, text_color = #F8FAFC, text_size = size.tiny)
-    table.cell(debugDashboard, 0, 5, "S SOURCES", text_color = supportColor, text_size = size.tiny)
-    table.cell(debugDashboard, 1, 5, supportZone.valid ? supportZone.sources : "n/a", text_color = #F8FAFC, text_size = size.tiny)
+        nearestState := "RESISTANCE · " + f_stateText(resistanceZone.state)
+        nearestColor := resistanceColor
+    string sessionText = inRth ? "RTH" : inPremarket ? "PREMARKET" : "OUTSIDE"
+    color sessionColor = inRth ? supportColor : inPremarket ? informationColor : neutralColor
+    color rowBackground = color.new(panelColor, 12)
+    color alternateBackground = color.new(panelColor, 5)
+    table.cell(dashboard, 0, 0, "Meridian -- Options Levels", bgcolor = color.new(brandColor, 18), text_color = textColor, text_size = f_textSize(dashboardSizeInput), text_halign = text.align_left)
+    table.cell(dashboard, 0, 1, "Resistance", bgcolor = rowBackground, text_color = resistanceColor, text_size = f_textSize(dashboardSizeInput), text_halign = text.align_left)
+    table.cell(dashboard, 1, 1, resistanceText, bgcolor = rowBackground, text_color = textColor, text_size = f_textSize(dashboardSizeInput), text_halign = text.align_right)
+    table.cell(dashboard, 0, 2, "Support", bgcolor = alternateBackground, text_color = supportColor, text_size = f_textSize(dashboardSizeInput), text_halign = text.align_left)
+    table.cell(dashboard, 1, 2, supportText, bgcolor = alternateBackground, text_color = textColor, text_size = f_textSize(dashboardSizeInput), text_halign = text.align_right)
+    table.cell(dashboard, 0, 3, "Nearest", bgcolor = rowBackground, text_color = neutralColor, text_size = f_textSize(dashboardSizeInput), text_halign = text.align_left)
+    table.cell(dashboard, 1, 3, nearestState, bgcolor = rowBackground, text_color = nearestColor, text_size = f_textSize(dashboardSizeInput), text_halign = text.align_right)
+    table.cell(dashboard, 0, 4, "Session", bgcolor = alternateBackground, text_color = neutralColor, text_size = f_textSize(dashboardSizeInput), text_halign = text.align_left)
+    table.cell(dashboard, 1, 4, sessionText, bgcolor = alternateBackground, text_color = sessionColor, text_size = f_textSize(dashboardSizeInput), text_halign = text.align_right)
 
 float nearestZoneState = na
 if supportZone.valid and resistanceZone.valid
@@ -1454,6 +1542,8 @@ plot(resistanceZone.valid ? resistanceZone.strength : na, "Resistance Zone Stren
 plot(nearestZoneState, "Zone State", display = showResearchValues ? display.data_window : display.none)
 plot(supportZone.valid ? supportZone.actionability : na, "Support Zone Actionability", display = showResearchValues ? display.data_window : display.none)
 plot(resistanceZone.valid ? resistanceZone.actionability : na, "Resistance Zone Actionability", display = showResearchValues ? display.data_window : display.none)
+plot(potentialSupportZone.valid ? potentialSupportZone.strength : na, "Potential Support Strength", display = showResearchValues ? display.data_window : display.none)
+plot(potentialResistanceZone.valid ? potentialResistanceZone.strength : na, "Potential Resistance Strength", display = showResearchValues ? display.data_window : display.none)
 plot(gapActive and not gapFilled ? gapHigh : na, "Gap High", display = display.none)
 plot(gapActive and not gapFilled ? gapLow : na, "Gap Low", display = display.none)
 plot(gapActive and not gapFilled ? gapMid : na, "Gap Mid", display = display.none)

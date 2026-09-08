@@ -2,15 +2,13 @@
 
 [← Main README](../README.md)
 
-Use the path that matches your goal.
-
 ## New users
 
 1. [Getting started](./getting-started.md)
-2. Choose an indicator guide below.
+2. Choose an indicator document below.
 3. Use [Troubleshooting](./troubleshooting.md) when a level, session or alert does not behave as expected.
 
-## Indicator guides
+## Indicator documentation
 
 ### Options underlyings
 
@@ -27,7 +25,8 @@ Use the path that matches your goal.
 ## Technical documentation
 
 - [Architecture and design boundaries](./architecture.md)
+- [Meridian visual and interaction standard](./design-system.md)
 - [Data integrity, confirmation and repainting](./data-integrity.md)
 - [Troubleshooting](./troubleshooting.md)
 
-Versions and release status are maintained in [`manifest.json`](../manifest.json). Source files use durable, versionless paths so documentation links remain valid across normal updates.
+Versions and status are maintained in [`manifest.json`](../manifest.json). Source files use durable, versionless paths so documentation links remain valid across normal updates.

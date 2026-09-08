@@ -1,9 +1,9 @@
 //@version=6
 // SPDX-License-Identifier: MPL-2.0
-// Meridian — Futures Levels · v0.1.5
+// Meridian — Futures Levels · v0.2.0
 
 indicator(
-     title = "Meridian — Futures Levels",
+     title = "Meridian - Futures Levels",
      shorttitle = "Meridian Futures Levels",
      overlay = true,
      format = format.price,
@@ -59,14 +59,14 @@ bool showORMid          = input.bool(true, "Show midpoint", group = G_OR)
 bool fillOR             = input.bool(true, "Fill range", group = G_OR)
 int  orLineWidth        = input.int(2, "Line width", minval = 1, maxval = 4, group = G_OR)
 
-bool showTimeMarkers     = input.bool(true, "Show vertical time markers", group = G_MARKERS)
+bool showTimeMarkers     = input.bool(false, "Show vertical time markers", group = G_MARKERS)
 bool showTimeMarkerLabels = input.bool(true, "Show time-marker labels", group = G_MARKERS)
 string timeMarkerLabelLayout = input.string("Stacked", "Marker-label layout", options = ["Single line", "Stacked"], group = G_MARKERS)
 string timeMarkerTextSize = input.string("Small", "Marker-label text size", options = ["Tiny", "Small", "Normal"], group = G_MARKERS)
 float timeMarkerTopPaddingAtr = input.float(0.75, "Marker-label top padding (ATR)", minval = 0.0, maxval = 5.0, step = 0.05, group = G_MARKERS,
      tooltip = "Places marker text above the current New York calendar-day high. Increase if labels still overlap candles.")
 int  maxTimeMarkerEvents = input.int(48, "Maximum marker events", minval = 8, maxval = 160, group = G_MARKERS)
-color timeMarkerColor    = input.color(color.rgb(244, 114, 182), "Marker color", group = G_MARKERS)
+color timeMarkerColor    = input.color(#8B5CF6, "Marker color", group = G_MARKERS)
 int  timeMarkerTransparency = input.int(82, "Marker transparency", minval = 65, maxval = 96, group = G_MARKERS)
 
 bool showIB             = input.bool(true, "Show Initial Balance", group = G_IB)
@@ -132,7 +132,7 @@ int   clusterMaximum    = input.int(5, "Maximum displayed clusters", minval = 1,
 int   clusterLeftBars   = input.int(18, "Zone width left (bars)", minval = 1, maxval = 300, group = G_CLUSTER)
 int   clusterRightBars  = input.int(24, "Zone width right (bars)", minval = 1, maxval = 300, group = G_CLUSTER)
 float clusterPaddingTicks = input.float(1.0, "Zone padding (ticks)", minval = 0.0, maxval = 20.0, step = 0.25, group = G_CLUSTER)
-bool  showClusterNames  = input.bool(true, "Show contributor names", group = G_CLUSTER)
+bool  showClusterNames  = input.bool(false, "Show contributor names", group = G_CLUSTER)
 int   clusterFillOpacity = input.int(89, "Zone transparency", minval = 60, maxval = 100, group = G_CLUSTER)
 
 bool showStates          = input.bool(true, "Enable acceptance / rejection engine", group = G_STATE)
@@ -148,20 +148,23 @@ bool  showStateLabels    = input.bool(false, "Show acceptance / rejection labels
 int   maximumStateLabels = input.int(60, "Maximum state labels", minval = 5, maxval = 180, group = G_STATE)
 int   stateCooldownBars  = input.int(3, "Per-level rejection cooldown (bars)", minval = 0, maxval = 100, group = G_STATE)
 
-color accentColor       = input.color(color.rgb(168, 85, 247), "Meridian accent", group = G_THEME)
-color secondaryColor    = input.color(color.rgb(99, 102, 241), "Secondary accent", group = G_THEME)
-color vwapColor         = input.color(color.rgb(45, 212, 191), "VWAP", group = G_THEME)
-color dayReferenceColor = input.color(color.rgb(196, 181, 253), "Previous day", group = G_THEME)
-color weekReferenceColor = input.color(color.rgb(139, 92, 246), "Previous week", group = G_THEME)
-color overnightColor    = input.color(color.rgb(148, 163, 184), "Overnight", group = G_THEME)
-color supportColor      = input.color(color.rgb(34, 197, 94), "Bullish state", group = G_THEME)
-color resistanceColor   = input.color(color.rgb(239, 68, 68), "Bearish state", group = G_THEME)
-color neutralColor      = input.color(color.rgb(148, 163, 184), "Neutral / muted", group = G_THEME)
-color panelColor        = input.color(color.rgb(15, 23, 42), "HUD background", group = G_THEME)
-color textColor         = input.color(color.rgb(241, 245, 249), "HUD text", group = G_THEME)
+color accentColor       = input.color(#8B5CF6, "Brand / header", group = G_THEME)
+color secondaryColor    = input.color(#C4B5FD, "Secondary", group = G_THEME)
+color vwapColor         = input.color(#2DD4BF, "VWAP", group = G_THEME)
+color dayReferenceColor = input.color(#38BDF8, "Previous day", group = G_THEME)
+color weekReferenceColor = input.color(#8B5CF6, "Previous week", group = G_THEME)
+color overnightColor    = input.color(#94A3B8, "Overnight", group = G_THEME)
+color supportColor      = input.color(#2DD4BF, "Support / bullish", group = G_THEME)
+color resistanceColor   = input.color(#F87171, "Resistance / bearish", group = G_THEME)
+color neutralColor      = input.color(#94A3B8, "Neutral", group = G_THEME)
+color pendingColor      = input.color(#A1A1AA, "Pending / developing", group = G_THEME)
+color warningColor      = input.color(#FBBF24, "Warning", group = G_THEME)
+color informationColor  = input.color(#38BDF8, "Information", group = G_THEME)
+color panelColor        = input.color(#090E17, "HUD background", group = G_THEME)
+color borderColor       = input.color(#334155, "HUD border", group = G_THEME)
+color textColor         = input.color(#F8FAFC, "HUD text", group = G_THEME)
 
 bool   showHUD           = input.bool(true, "Show compact HUD", group = G_HUD)
-string hudPosition       = input.string("Bottom Right", "HUD position", options = ["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group = G_HUD)
 string hudTextSize       = input.string("Small", "HUD text size", options = ["Tiny", "Small", "Normal"], group = G_HUD)
 bool   enableDynamicAlerts = input.bool(false, "Enable dynamic JSON alert() calls", group = G_HUD,
      tooltip = "Create an alert using: Any alert() function call. State events are confirmed at bar close.")
@@ -177,13 +180,6 @@ f_label_size(string sizeName) =>
         "Tiny"   => size.tiny
         "Normal" => size.normal
         => size.small
-
-f_table_position(string positionName) =>
-    switch positionName
-        "Top Left"     => position.top_left
-        "Bottom Right" => position.bottom_right
-        "Bottom Left"  => position.bottom_left
-        => position.top_right
 
 f_session_active(string sessionString, string timezoneString) =>
     not na(time(timeframe.period, sessionString, timezoneString))
@@ -632,7 +628,7 @@ if bestEventCode != 0 and showStateLabels
 if enableDynamicAlerts and bestEventCode != 0
     string jsonMessage = "{" +
          "\"source\":\"meridian_futures_levels\"," +
-         "\"version\":\"0.1.5\"," +
+         "\"version\":\"0.2.0\"," +
          "\"event\":\"level_state\"," +
          "\"symbol\":\"" + syminfo.tickerid + "\"," +
          "\"timeframe\":\"" + timeframe.period + "\"," +
@@ -697,17 +693,19 @@ if barstate.islast
     if orVisualReady
         if na(orHighGuide)
             orHighGuide := line.new(safeOrStart, orHigh, rangeEndX, orHigh, xloc = xloc.bar_index,
-                 extend = extend.none, color = orhColor, style = line.style_solid, width = orLineWidth)
+                 extend = extend.none, color = orhColor, style = inOR ? line.style_dashed : line.style_solid, width = orLineWidth)
             orLowGuide := line.new(safeOrStart, orLow, rangeEndX, orLow, xloc = xloc.bar_index,
-                 extend = extend.none, color = orlColor, style = line.style_solid, width = orLineWidth)
+                 extend = extend.none, color = orlColor, style = inOR ? line.style_dashed : line.style_solid, width = orLineWidth)
         else
             line.set_xy1(orHighGuide, safeOrStart, orHigh)
             line.set_xy2(orHighGuide, rangeEndX, orHigh)
             line.set_color(orHighGuide, orhColor)
+            line.set_style(orHighGuide, inOR ? line.style_dashed : line.style_solid)
             line.set_width(orHighGuide, orLineWidth)
             line.set_xy1(orLowGuide, safeOrStart, orLow)
             line.set_xy2(orLowGuide, rangeEndX, orLow)
             line.set_color(orLowGuide, orlColor)
+            line.set_style(orLowGuide, inOR ? line.style_dashed : line.style_solid)
             line.set_width(orLowGuide, orLineWidth)
 
         if showORMid
@@ -753,17 +751,19 @@ if barstate.islast
     if ibVisualReady
         if na(ibHighGuide)
             ibHighGuide := line.new(safeIbStart, ibHigh, rangeEndX, ibHigh, xloc = xloc.bar_index,
-                 extend = extend.none, color = ibhColor, style = line.style_solid, width = ibLineWidth)
+                 extend = extend.none, color = ibhColor, style = inIB ? line.style_dashed : line.style_solid, width = ibLineWidth)
             ibLowGuide := line.new(safeIbStart, ibLow, rangeEndX, ibLow, xloc = xloc.bar_index,
-                 extend = extend.none, color = iblColor, style = line.style_solid, width = ibLineWidth)
+                 extend = extend.none, color = iblColor, style = inIB ? line.style_dashed : line.style_solid, width = ibLineWidth)
         else
             line.set_xy1(ibHighGuide, safeIbStart, ibHigh)
             line.set_xy2(ibHighGuide, rangeEndX, ibHigh)
             line.set_color(ibHighGuide, ibhColor)
+            line.set_style(ibHighGuide, inIB ? line.style_dashed : line.style_solid)
             line.set_width(ibHighGuide, ibLineWidth)
             line.set_xy1(ibLowGuide, safeIbStart, ibLow)
             line.set_xy2(ibLowGuide, rangeEndX, ibLow)
             line.set_color(ibLowGuide, iblColor)
+            line.set_style(ibLowGuide, inIB ? line.style_dashed : line.style_solid)
             line.set_width(ibLowGuide, ibLineWidth)
 
         if showIBMid
@@ -1247,8 +1247,9 @@ if barstate.islast
                         box.set_border_color(clusterBox, color.new(directionalColor, 18))
                         box.set_bgcolor(clusterBox, color.new(accentColor, clusterFillOpacity))
 
-                    string clusterText = "CONFLUENCE ×" + str.tostring(contributors) + "  •  " + str.tostring(center, format.mintick)
-                    clusterText += "\nScore " + str.tostring(score, "#.##")
+                    string clusterText = "CONFLUENCE ×" + str.tostring(contributors)
+                    if showPriceInTags
+                        clusterText += " · " + str.tostring(center, format.mintick)
                     if showClusterNames
                         clusterText += "\n" + contributorNames
 
@@ -1278,51 +1279,48 @@ if barstate.islast
         label.delete(array.pop(clusterLabels))
 
 var table hud = table.new(
-     f_table_position(hudPosition), 2, 8,
-     bgcolor = showHUD and indicatorEnabled ? color.new(panelColor, 12) : na,
-     frame_color = showHUD and indicatorEnabled ? color.new(accentColor, 35) : na, frame_width = 1,
-     border_color = showHUD and indicatorEnabled ? color.new(neutralColor, 82) : na, border_width = 1)
+     position.top_right, 2, 7,
+     bgcolor = color.new(panelColor, 10),
+     frame_color = color.new(borderColor, 35), frame_width = 1,
+     border_color = color.new(borderColor, 72), border_width = 1)
 
 if barstate.isfirst
     table.merge_cells(hud, 0, 0, 1, 0)
 
 if barstate.islast
     string activeSession = inOR ? "Opening Range" : inIB ? "Initial Balance" : inRTH ? "RTH" : inOvernight ? "Overnight" : inFutures ? "Globex" : "Closed"
-    color activeSessionColor = inRTH ? accentColor : inOvernight ? secondaryColor : neutralColor
+    color activeSessionColor = inRTH ? supportColor : inOvernight ? informationColor : neutralColor
     bool timeframeWarning = not timeframe.isintraday or timeframe.in_seconds() > 30 * 60
     bool nonFuturesSymbol = syminfo.type != "futures"
     int freshnessThresholdMs = math.max(int(timeframe.in_seconds() * 3000.0), 15 * 60 * 1000)
     bool dataStale = timenow > time_close and timenow - time_close > freshnessThresholdMs
-    string dataState = barstate.isrealtime ? "LIVE" : dataStale ? "STALE / CLOSED" : "LAST CONFIRMED"
-    color dataStateColor = barstate.isrealtime ? supportColor : dataStale ? color.orange : neutralColor
+    string dataState = barstate.isrealtime ? "LIVE" : dataStale ? "STALE / CLOSED" : "CONFIRMED"
     string orText = not na(orHigh) and not na(orLow) ? str.tostring(orHigh - orLow, format.mintick) : "—"
     string ibText = not na(ibHigh) and not na(ibLow) ? str.tostring(ibHigh - ibLow, format.mintick) : "—"
     string vwapText = not na(customVWAP) ? str.tostring(customVWAP, format.mintick) : "—"
-    string vwapLabel = "VWAP (" + (vwapAnchor == "Full Futures Session" ? "Session" : vwapAnchor) + ")"
+    string vwapLabel = "VWAP " + (vwapAnchor == "Full Futures Session" ? "SESSION" : str.upper(vwapAnchor))
     string lastStateText = lastEventName == "None" ? "Waiting" : lastEventName + " · " + lastEventState
-    string modeText = timeframeWarning ? "Use ≤30m; ≤15m preferred" : nonFuturesSymbol ? "Non-futures symbol" : "Confirmed states"
-    color modeColor = timeframeWarning or nonFuturesSymbol ? color.orange : supportColor
+    string dataDetail = timeframeWarning ? "USE ≤30M" : nonFuturesSymbol ? "NON-FUTURES" : dataState
+    color dataDetailColor = timeframeWarning or nonFuturesSymbol or dataStale ? warningColor : barstate.isrealtime ? informationColor : neutralColor
 
-    color transparentPanel = showHUD and indicatorEnabled ? color.new(panelColor, 12) : color.new(panelColor, 100)
-    color transparentText = showHUD and indicatorEnabled ? textColor : color.new(textColor, 100)
-    color mutedHudText = showHUD and indicatorEnabled ? color.new(textColor, 25) : color.new(textColor, 100)
+    color panel = showHUD and indicatorEnabled ? color.new(panelColor, 10) : color.new(panelColor, 100)
+    color alternate = showHUD and indicatorEnabled ? color.new(panelColor, 4) : color.new(panelColor, 100)
+    color visibleText = showHUD and indicatorEnabled ? textColor : color.new(textColor, 100)
+    color mutedText = showHUD and indicatorEnabled ? neutralColor : color.new(neutralColor, 100)
 
-    table.cell(hud, 0, 0, "MERIDIAN  —  FUTURES LEVELS  ·  v0.1.5", bgcolor = showHUD and indicatorEnabled ? color.new(accentColor, 18) : color.new(accentColor, 100), text_color = transparentText, text_size = f_label_size(hudTextSize))
-    table.cell(hud, 0, 1, "Last bar", bgcolor = transparentPanel, text_color = mutedHudText, text_size = f_label_size(hudTextSize))
-    table.cell(hud, 1, 1, activeSession, bgcolor = transparentPanel, text_color = showHUD and indicatorEnabled ? activeSessionColor : color.new(activeSessionColor, 100), text_size = f_label_size(hudTextSize))
-    table.cell(hud, 0, 2, "Data", bgcolor = transparentPanel, text_color = mutedHudText, text_size = f_label_size(hudTextSize))
-    table.cell(hud, 1, 2, dataState, bgcolor = transparentPanel, text_color = showHUD and indicatorEnabled ? dataStateColor : color.new(dataStateColor, 100), text_size = f_label_size(hudTextSize))
-    table.cell(hud, 0, 3, "OR range", bgcolor = transparentPanel, text_color = mutedHudText, text_size = f_label_size(hudTextSize))
-    table.cell(hud, 1, 3, orText, bgcolor = transparentPanel, text_color = transparentText, text_size = f_label_size(hudTextSize))
-    table.cell(hud, 0, 4, "IB range", bgcolor = transparentPanel, text_color = mutedHudText, text_size = f_label_size(hudTextSize))
-    table.cell(hud, 1, 4, ibText, bgcolor = transparentPanel, text_color = transparentText, text_size = f_label_size(hudTextSize))
-    table.cell(hud, 0, 5, vwapLabel, bgcolor = transparentPanel, text_color = mutedHudText, text_size = f_label_size(hudTextSize))
-    table.cell(hud, 1, 5, vwapText, bgcolor = transparentPanel, text_color = showHUD and indicatorEnabled ? vwapColor : color.new(vwapColor, 100), text_size = f_label_size(hudTextSize))
-    table.cell(hud, 0, 6, "Last state", bgcolor = transparentPanel, text_color = mutedHudText, text_size = f_label_size(hudTextSize))
-    table.cell(hud, 1, 6, lastStateText, bgcolor = transparentPanel, text_color = transparentText, text_size = f_label_size(hudTextSize))
-    table.cell(hud, 0, 7, timeframeWarning ? "Timeframe" : "Mode", bgcolor = transparentPanel, text_color = mutedHudText, text_size = f_label_size(hudTextSize))
-    table.cell(hud, 1, 7, modeText, bgcolor = transparentPanel,
-         text_color = showHUD and indicatorEnabled ? modeColor : color.new(textColor, 100), text_size = f_label_size(hudTextSize))
+    table.cell(hud, 0, 0, "Meridian -- Futures Levels", bgcolor = showHUD and indicatorEnabled ? color.new(accentColor, 18) : color.new(accentColor, 100), text_color = visibleText, text_size = f_label_size(hudTextSize), text_halign = text.align_left)
+    table.cell(hud, 0, 1, "Session", bgcolor = panel, text_color = mutedText, text_size = f_label_size(hudTextSize), text_halign = text.align_left)
+    table.cell(hud, 1, 1, activeSession, bgcolor = panel, text_color = showHUD and indicatorEnabled ? activeSessionColor : color.new(activeSessionColor, 100), text_size = f_label_size(hudTextSize), text_halign = text.align_right)
+    table.cell(hud, 0, 2, "OR", bgcolor = alternate, text_color = mutedText, text_size = f_label_size(hudTextSize), text_halign = text.align_left)
+    table.cell(hud, 1, 2, orText, bgcolor = alternate, text_color = visibleText, text_size = f_label_size(hudTextSize), text_halign = text.align_right)
+    table.cell(hud, 0, 3, "IB", bgcolor = panel, text_color = mutedText, text_size = f_label_size(hudTextSize), text_halign = text.align_left)
+    table.cell(hud, 1, 3, ibText, bgcolor = panel, text_color = visibleText, text_size = f_label_size(hudTextSize), text_halign = text.align_right)
+    table.cell(hud, 0, 4, vwapLabel, bgcolor = alternate, text_color = mutedText, text_size = f_label_size(hudTextSize), text_halign = text.align_left)
+    table.cell(hud, 1, 4, vwapText, bgcolor = alternate, text_color = showHUD and indicatorEnabled ? vwapColor : color.new(vwapColor, 100), text_size = f_label_size(hudTextSize), text_halign = text.align_right)
+    table.cell(hud, 0, 5, "State", bgcolor = panel, text_color = mutedText, text_size = f_label_size(hudTextSize), text_halign = text.align_left)
+    table.cell(hud, 1, 5, lastStateText, bgcolor = panel, text_color = visibleText, text_size = f_label_size(hudTextSize), text_halign = text.align_right)
+    table.cell(hud, 0, 6, "Data", bgcolor = alternate, text_color = mutedText, text_size = f_label_size(hudTextSize), text_halign = text.align_left)
+    table.cell(hud, 1, 6, dataDetail, bgcolor = alternate, text_color = showHUD and indicatorEnabled ? dataDetailColor : color.new(dataDetailColor, 100), text_size = f_label_size(hudTextSize), text_halign = text.align_right)
 
 alertcondition(stateAcceptedAbove, "Meridian — Level accepted above", "Meridian Futures Levels: price accepted above a tracked level.")
 alertcondition(stateAcceptedBelow, "Meridian — Level accepted below", "Meridian Futures Levels: price accepted below a tracked level.")

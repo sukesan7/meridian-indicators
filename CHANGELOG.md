@@ -2,22 +2,61 @@
 
 All notable repository and public-script changes are recorded here.
 
-## [0.1.3] — 2026-09-07
+## [0.2.0] — 2026-09-07
 
-### Futures Levels 0.1.5
+### Catalog design system
 
-- Reworked session-boundary detection so RTH resets use the New York session date and full-futures/overnight resets use the instrument trading day rather than depending on an out-of-session chart bar.
-- Fixed RTH VWAP, full-session VWAP and their deviation bands carrying prior sessions forward on RTH-only charts or across futures maintenance gaps.
-- Fixed RTH open, futures-session open and custom-RTH previous-day high/low rollover so new sessions initialize correctly after weekends, holidays and chart-data gaps.
-- Added explicit source identities for previous-day and previous-week references so state history resets when the underlying confirmed source period changes, even when the new price is close to the old one.
-- Reset VWAP and ±1σ acceptance/rejection state at every VWAP anchor change so confirmation counts cannot span separate sessions or weeks.
-- Corrected moving-level rejection logic to compare the previous close with the previous tracked VWAP/band value instead of the current bar's moved reference.
-- Restricted RTH-open state/clustering to active RTH and futures-session-open state/clustering to the active full session so stale opens do not influence unrelated overnight periods.
-- Corrected vertical time-marker boundary handling, deduplicated markers at exact timestamps and kept historical marker labels aligned with the developing day high.
-- Updated the HUD to distinguish the last bar's session from live data freshness, show `LIVE`, `LAST CONFIRMED` or `STALE / CLOSED`, identify the active VWAP anchor and warn when the script is being tested on a non-futures symbol.
-- Separated previous-day/week drawing start bars from futures-session bookkeeping and removed unused session-start state.
-- Aligned the source header, HUD and dynamic JSON alert metadata to version 0.1.5.
-- Preserved confirmed prior-day/prior-week higher-timeframe requests, bounded drawing/state storage and confirmed-bar state alerts.
+- Standardized the public catalog on the Meridian semantic palette: purple brand/header, teal bullish/support, coral bearish/resistance, cyan information, slate neutral, gray pending/developing and amber warnings.
+- Standardized drawing semantics: solid confirmed references, dashed developing references, dotted projections, translucent gray potential states and faded/frozen invalidated states.
+- Standardized normal text to Small with user-adjustable sizing.
+- Rebuilt all normal dashboards as restrained top-right HUDs with `Meridian -- NAME` headers and no version number.
+- Added `docs/design-system.md` and removed unused helper functions exposed by the visual cleanup.
+
+### Options Levels 0.3.0
+
+- Retained the reaction-zone architecture while standardizing the chart/HUD presentation for SPY options-underlying use.
+- Added confirmed Equal High / Equal Low zone candidates with adaptive tolerance and bounded age.
+- Added optional research-only potential support/resistance ghost zones below the normal qualification threshold.
+- Changed Event AVWAP to disabled by default for the SPY-focused workflow while retaining manual and earnings modes.
+- Preserved confirmed daily ATR, RTH/premarket session identity, actionability, hysteresis, BUY/SELL edge areas and confirmed zone lifecycle behavior.
+
+### Options Context 0.3.0
+
+- Standardized the lower-pane palette and compact dashboard.
+- Corrected local EMA slope normalization to a per-bar slope before ATR normalization, preventing the slope-lookback setting from mechanically changing scale.
+- Preserved the continuous Direction/Confidence model, same-time RVOL, magnitude-aware agreement and confirmed quality-aware 1H/4H/1D/1W context.
+- Added clear live/confirmed/stale data-state presentation.
+
+### Futures Levels 0.2.0
+
+- Standardized chart/HUD visuals and reduced default marker/cluster-label clutter.
+- Made OR/IB references dashed while developing and solid after confirmation.
+- Preserved and re-audited trading-day/RTH session identities, VWAP reset/state behavior, moving-reference rejection timing and stale-data handling introduced in 0.1.5.
+- Updated telemetry metadata to 0.2.0.
+
+### Futures Context 0.2.0
+
+- Standardized lower-pane visuals and corrected EMA/VWAP slopes to per-bar ATR-normalized values.
+- Expanded the NQ/ES comparison into a multi-peer NQ/ES/YM/RTY intermarket engine with rolling beta, correlation, residual z-score, breadth and divergence/decoupling states.
+- Kept the current session out of its own same-time baseline until observations confirm.
+
+### Futures Profile 0.2.0
+
+- Standardized profile/HUD presentation and added bounded Initial Balance range/volume percentile statistics plus IB efficiency.
+- Added narrow/normal/wide/extreme IB classification for auction research.
+- Fixed a session-roll defect that could overwrite an already finalized RTH close/end bar with the last premarket bar at the next RTH open.
+- Updated telemetry metadata to 0.2.0.
+
+### Futures Setups 0.4.0-beta
+
+- Standardized Daily and Research build visuals while preserving live-qualification parity.
+- Added Automatic/Manual multi-timeframe source selection.
+- Added bounded zone-width percentile quality on top of ATR normalization.
+- Added explicit causal-chain authority for ordered liquidity sweep → structure/MSS → displacement evidence.
+- Enhanced overlap authority for breaker/OB + FVG/IFVG combinations without allowing overlap to bypass mandatory gates.
+- Added nearest structural objective information to hypothesis evidence after objective-space qualification.
+- Reworked research zones around BUILDING / CONFIRMED / INVALIDATED visual states inspired by the useful lifecycle patterns in the legacy research scripts.
+- Updated repository parity validation for the 0.4.0-beta Daily/Research headers.
 
 ## [0.1.2] — 2026-08-11
 
