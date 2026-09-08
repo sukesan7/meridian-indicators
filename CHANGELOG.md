@@ -2,6 +2,23 @@
 
 All notable repository and public-script changes are recorded here.
 
+## [0.1.3] — 2026-09-07
+
+### Futures Levels 0.1.5
+
+- Reworked session-boundary detection so RTH resets use the New York session date and full-futures/overnight resets use the instrument trading day rather than depending on an out-of-session chart bar.
+- Fixed RTH VWAP, full-session VWAP and their deviation bands carrying prior sessions forward on RTH-only charts or across futures maintenance gaps.
+- Fixed RTH open, futures-session open and custom-RTH previous-day high/low rollover so new sessions initialize correctly after weekends, holidays and chart-data gaps.
+- Added explicit source identities for previous-day and previous-week references so state history resets when the underlying confirmed source period changes, even when the new price is close to the old one.
+- Reset VWAP and ±1σ acceptance/rejection state at every VWAP anchor change so confirmation counts cannot span separate sessions or weeks.
+- Corrected moving-level rejection logic to compare the previous close with the previous tracked VWAP/band value instead of the current bar's moved reference.
+- Restricted RTH-open state/clustering to active RTH and futures-session-open state/clustering to the active full session so stale opens do not influence unrelated overnight periods.
+- Corrected vertical time-marker boundary handling, deduplicated markers at exact timestamps and kept historical marker labels aligned with the developing day high.
+- Updated the HUD to distinguish the last bar's session from live data freshness, show `LIVE`, `LAST CONFIRMED` or `STALE / CLOSED`, identify the active VWAP anchor and warn when the script is being tested on a non-futures symbol.
+- Separated previous-day/week drawing start bars from futures-session bookkeeping and removed unused session-start state.
+- Aligned the source header, HUD and dynamic JSON alert metadata to version 0.1.5.
+- Preserved confirmed prior-day/prior-week higher-timeframe requests, bounded drawing/state storage and confirmed-bar state alerts.
+
 ## [0.1.2] — 2026-08-11
 
 ### Options Context 0.2.1

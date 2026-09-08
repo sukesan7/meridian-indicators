@@ -27,7 +27,7 @@
     {
       "id": "futures-levels",
       "name": "Meridian — Futures Levels",
-      "version": "0.1.0",
+      "version": "0.1.5",
       "market": "index-futures",
       "status": "stable",
       "source": "src/futures/meridian-futures-levels.pine",
