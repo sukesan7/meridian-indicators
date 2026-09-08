@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="./assets/meridian-banner.png" alt="Meridian Trading" width="100%">
+  <img src="./assets/vaelorn-research-banner.png" alt="Vaelorn Research" width="100%">
 </p>
 
-<h1 align="center">Meridian Indicators</h1>
+<h1 align="center">Meridian Indicators by Vaelorn Research</h1>
 
 <p align="center">
   Open-source TradingView indicators for structured intraday analysis of liquid options underlyings and US index futures.
@@ -21,7 +21,7 @@
 
 ## Start here
 
-Meridian separates market analysis into focused tools instead of combining every concept into one chart script.
+Vaelorn Research's Meridian separates market analysis into focused tools instead of combining every concept into one chart script.
 
 1. Choose an indicator from the catalog below.
 2. Open its source file and copy the complete Pine Script.
