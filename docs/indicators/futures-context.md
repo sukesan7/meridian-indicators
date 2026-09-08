@@ -2,7 +2,7 @@
 
 [← Indicator documentation](../README.md) · [View source](../../src/futures/meridian-futures-context.pine)
 
-**Version:** 0.1.7<br>
+**Version:** 0.2.0<br>
 **Status:** Stable<br>
 **Primary markets:** NQ, MNQ, ES and MES
 
@@ -10,73 +10,67 @@
 
 ## Purpose
 
-Futures Context is a lower-pane market-environment classifier. It combines same-time participation, realized volatility, developing range, RTH VWAP location, EMA structure, ADX, directional efficiency and beta-adjusted relative strength.
+Futures Context classifies the current futures environment from same-time participation, realized volatility, range development, RTH VWAP location, trend quality and intermarket behavior.
 
-The dashboard's confidence value is feature agreement, not empirical win probability.
+The regime confidence value measures agreement within the model. It is not a win probability.
 
-## Same-time baseline engine
+## v0.2 revamp
 
-The script stores bounded historical samples for each RTH chart-time slot. Current bar volume and developing session range are compared with prior sessions at the equivalent time. The active session is not added to its own baseline until bars confirm.
+- standardized lower-pane colors and the compact `Meridian -- Futures Context` HUD;
+- corrected EMA and VWAP slope normalization to measure slope per lookback bar before ATR normalization;
+- expanded the former single NQ/ES relative-strength anchor into a multi-peer intermarket engine;
+- added beta-adjusted residual z-scores, rolling correlation quality, market breadth and explicit divergence/decoupling states;
+- kept the same-time baseline engine isolated from the current session until bars confirm;
+- reduced optional plot clutter in the default view.
 
-Outputs include:
+## Same-time baselines
 
-- bar RVOL;
-- cumulative RVOL;
-- developing-range ratio;
-- warm-up and sample-readiness state.
+For each RTH chart-time slot the script stores bounded historical samples. Current bar volume, cumulative volume and developing range are compared with prior sessions at the equivalent stage of the day. The active observation is read against the prior baseline before it is committed after confirmation.
 
 ## Trend and volatility
 
-EMA stacking and separation describe directional structure. ADX and DI measure trend strength and direction. Directional efficiency compares net movement with total path length. Rolling realized volatility is compared with its own baseline and z-score.
+Trend quality combines EMA structure/separation, ADX/DI, directional efficiency and VWAP slope. Realized volatility is compared with its own history and developing range is compared with same-time session history.
 
-## Relative strength
+## Intermarket engine
 
-The default anchor automatically pairs Nasdaq futures with S&P futures and vice versa. Rolling beta, return correlation and a relative residual z-score describe dislocation between the chart symbol and the anchor.
+Automatic peers are selected from NQ, ES, YM and RTY according to the chart market. For each available peer the engine calculates:
 
-This is a statistical comparison, not a guaranteed lead-lag signal.
+- one-bar return;
+- rolling beta and correlation;
+- horizon return;
+- beta-adjusted residual;
+- residual z-score.
 
-## Regime engine
+Peer residuals are combined with correlation-quality weighting. The model also measures the sign breadth of the chart and available peers.
 
-The deterministic engine scores direction, expansion, compression and balance. The resulting labels include bullish or bearish trend/expansion, balanced rotation, compression, volatility expansion, transition and outside-RTH states.
+Possible states include:
+
+- `Broad Risk-On` / `Broad Risk-Off`;
+- `Leading` / `Lagging`;
+- `Leading / Diverging` / `Lagging / Diverging`;
+- `In Line`;
+- `Warming Up`.
+
+A large residual is treated as more meaningful when peer correlation remains sufficiently high. This is statistical context, not a guaranteed lead/lag relationship.
+
+## Regime model
+
+The deterministic engine separates direction, trend quality, expansion, compression and balance. Outputs include bullish/bearish trend, directional expansion, balanced rotation, compression, volatility expansion, transition and optional outside-RTH state.
 
 ## Recommended setup
 
 ```text
-Market: NQ/ES or micro equivalent
+Market: NQ/MNQ, ES/MES, YM/MYM or RTY/M2K
 Chart: 1–15 minutes
 RTH: 09:30–16:00 ET
-Baseline history: enough loaded sessions for same-time samples
-Relative anchor: automatic NQ/ES pairing
-Alerts: once per bar close
+Same-time baseline: enough loaded sessions for minimum samples
+Intermarket: Automatic
 ```
 
-## Important settings
+## Dashboard and alerts
 
-| Group | Use |
-|---|---|
-| General | Enable state and outside-RTH classification |
-| Session + Baselines | RTH definition, history and minimum samples |
-| Participation / RVOL | Participation thresholds and display |
-| Realized Volatility | Windows, expansion and contraction thresholds |
-| VWAP Context | Source, slopes and rotation behavior |
-| EMA Structure | Lengths, compression and expansion thresholds |
-| Trend Quality | ADX, DI and efficiency |
-| Relative Strength | Anchor, beta window and residual thresholds |
-| Regime Engine | Direction and state thresholds |
-| Supporting Plots | Pane visibility and caps |
-| Dashboard + Alerts | Layout and static/dynamic alerts |
-
-## Alerts
-
-Conditions cover regime changes, same-time RVOL spikes, realized-volatility expansion and relative-strength dislocation. Optional dynamic JSON includes regime and component values.
+The top-right HUD summarizes regime, participation, trend, volatility, intermarket state, location and data freshness. Confirmed alerts cover regime changes, RVOL spikes, volatility expansion and intermarket dislocation.
 
 ## Limitations
 
-- Baselines need sufficient loaded history and comparable sessions.
-- Early closes, holidays and missing bars can reduce same-time sample quality.
-- Relative strength depends on the comparison symbol and data feed.
-- Regime labels describe current evidence; they are not forecasts.
-
-## Suggested companions
-
-Use [Futures Levels](./futures-levels.md) for location and [Futures Profile](./futures-profile.md) for auction context.
+Same-time baselines need comparable history. Early closes and missing bars can reduce sample quality. Continuous futures and peer feeds can differ. Intermarket residuals describe abnormal relative movement; they do not prove causality.

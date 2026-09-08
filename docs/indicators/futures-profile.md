@@ -2,7 +2,7 @@
 
 [← Indicator documentation](../README.md) · [View source](../../src/futures/meridian-futures-profile.pine)
 
-**Version:** 0.1.2<br>
+**Version:** 0.2.0<br>
 **Status:** Preview<br>
 **Primary markets:** NQ, MNQ, ES and MES
 
@@ -10,73 +10,64 @@
 
 ## Purpose
 
-Futures Profile builds current and previous regular-session Time Price Opportunity profiles. It describes where the auction spent time, where value formed and how the current distribution relates to the prior completed session.
+Futures Profile is the auction layer. It builds current and previous RTH Time Price Opportunity profiles, estimates value and profile structure, and classifies how the current auction relates to the completed prior session.
+
+## v0.2 revamp
+
+- standardized profile colors, small adjustable text and the fixed top-right `Meridian -- Futures Profile` HUD;
+- added historical Initial Balance quality using bounded IB-range and IB-volume percentile baselines;
+- added IB efficiency from net RTH-open displacement relative to the completed IB range;
+- fixed a session-roll defect where a profile already finalized at RTH end could have its true RTH close/end bar overwritten by the last premarket bar when the next RTH opened;
+- retained bounded maps and drawing limits for profile safety;
+- aligned dynamic telemetry with v0.2.0.
 
 ## TPO construction
 
-The configured RTH session is divided into time blocks. Each completed block contributes one TPO to every price row traversed by that block. Row size can be selected manually or estimated from market tick size and a target row count.
+The RTH session is divided into configured time blocks. Each completed block contributes one TPO to every price row traversed by that block. The active block can be included for display while completed-block accounting remains separate.
 
-The current profile includes the active block for display while preserving completed-block accounting for finalized statistics.
+Row size can be automatic or manual. Automatic sizing uses the previous session range and a target row count, bounded by the instrument tick size.
 
-## Core statistics
+## Core outputs
 
-- TPO Point of Control;
-- Value Area High and Value Area Low;
-- profile high, low and midpoint;
-- TPO counts above and below POC;
-- Initial Balance;
+- TPO POC, VAH and VAL;
+- profile high/low/midpoint;
+- Initial Balance and extensions;
+- TPO counts above/below POC;
 - rotation factor;
 - single-print rows;
-- poor high and poor low;
-- previous-profile level tests and repairs.
+- poor high / poor low;
+- profile shape and auction state;
+- current-vs-previous value and POC migration.
 
-## Profile classifications
+## Initial Balance quality
 
-The script uses deterministic shape rules to describe D, P, b, double-distribution and trend profiles. It also classifies value relationship, POC migration, opening location, current location and a basic Auction Market Theory state.
+After the configured IB completes, its range and confirmed IB volume are compared with a bounded history of prior completed IBs. The dashboard classifies the current IB as `NARROW`, `NORMAL`, `WIDE` or `EXTREME` and can show its range and volume percentiles.
 
-These labels summarize the current distribution. They are not forecasts.
+The statistic is descriptive. It is intended to help study range-consumption/day-type behavior rather than assert that a particular IB percentile guarantees expansion or rotation.
 
 ## Estimated volume profile
 
-The optional volume profile distributes each chart bar's volume uniformly across the rows crossed by that bar. It can estimate volume POC and value area, but it is not exchange-native volume at price and contains no bid/ask aggressor information.
+Optional estimated volume distributes each confirmed chart bar's volume uniformly across every price row the bar traversed. Estimated VPOC/VAH/VAL are useful approximations but are **not** exchange-native volume-at-price, bid/ask delta or footprint data.
 
 ## Recommended setup
 
 ```text
-Market: active NQ, MNQ, ES or MES contract
+Market: active NQ/MNQ or ES/MES contract
 Chart: 1–15 minutes, standard candles
 RTH: 09:30–16:00 ET
-TPO block: commonly 30 minutes
-Row size: automatic first, then adjust for readability
+TPO block: 30 minutes
+Row size: Auto initially
 Estimated volume: optional
 ```
 
-## Important settings
+## Dashboard
 
-| Group | Use |
-|---|---|
-| General | Enable state and chart-type warning |
-| Session + TPO Blocks | RTH and block duration |
-| Profile Rows | Automatic/manual row sizing and row limits |
-| Profile Display | Width, placement, counts and current/previous visibility |
-| Levels + Structure | POC, value, midpoint, IB, single prints and poor extremes |
-| Estimated Volume Profile | Optional volume distribution and value area |
-| Auction Classification | Shape and state thresholds |
-| Theme / Dashboard | Colors and layout |
-| Alerts + Telemetry | Level tests, repairs, auction changes and JSON |
+The simple HUD shows auction state, value migration, profile shape, IB quality, location and data/warning state. Detailed calculation values remain on the chart or in alerts rather than becoming dashboard cards.
 
 ## Alerts
 
-Conditions cover tests of previous POC, VAH and VAL; entry into previous single-print zones; poor-high/poor-low repair; and auction-state changes.
+Confirmed conditions cover previous POC/VAH/VAL tests, previous single-print interaction, poor-extreme repair and auction-state changes. Optional JSON telemetry mirrors the same confirmed events.
 
 ## Limitations
 
-- TPO precision depends on chart data, block duration and row size.
-- Rendering limits can truncate unusually large profiles.
-- Automatic row sizing is a usability heuristic.
-- The volume profile is estimated from bars, not native exchange volume at price.
-- Preview status means thresholds and display behavior can still change.
-
-## Suggested companions
-
-Use [Futures Levels](./futures-levels.md) for objective references and [Futures Context](./futures-context.md) for participation and regime.
+TPO precision depends on chart timeframe, session alignment and row size. Rendering is bounded. Automatic row sizing is a usability heuristic. IB percentiles require enough completed sessions to warm up. Estimated volume is not native footprint data.

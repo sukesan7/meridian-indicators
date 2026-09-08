@@ -2,7 +2,7 @@
 
 [← Indicator documentation](../README.md) · [Daily source](../../src/futures/meridian-futures-setups.pine) · [Research source](../../src/futures/meridian-futures-setups-research.pine)
 
-**Version:** 0.3.6-beta<br>
+**Version:** 0.4.0-beta<br>
 **Status:** Beta<br>
 **Primary markets:** NQ, MNQ, ES and MES
 
@@ -10,175 +10,116 @@
 
 ## Purpose
 
-Futures Setups is a strategy-neutral, multi-timeframe confluence scanner. One **Meridian Choice** engine detects zones, measures independent evidence, applies lifecycle and risk gates, selects the strongest qualified candidate and creates a temporary BUY or SELL trade hypothesis.
+Futures Setups is the qualification layer. It registers multi-timeframe FVG/IFVG/OB/BB zones, measures independent evidence, applies timing/risk/lifecycle gates and creates a temporary BUY or SELL **trade hypothesis** only for the strongest candidate that passes the complete model.
 
-It does not contain named playbooks, place broker orders or guarantee an outcome.
+It does not place broker orders and its score is not a probability.
 
-## Choose a build
+## Builds
 
 | Build | Use |
 |---|---|
-| Daily | Normal chart operation with restrained visuals |
-| Research | Zone drawings, candidate labels, rejection reasons, score detail and outcome counters |
+| Daily | Restrained normal chart operation |
+| Research | Same live qualification logic plus building zones, score tooltips, rejection reasons, liquidity lines and outcome counters |
 
-The two builds share the same live qualification logic. Research visibility does not lower the score threshold or convert rejected candidates into live signals.
+Daily/research parity is statically validated by the repository tooling.
 
-## Recommended configuration
+## v0.4 revamp
+
+The beta engine keeps the existing qualification model and incorporates the useful architectural ideas extracted from the legacy liquidity/MSS/IFVG/Unicorn scripts without copying their weaker bias or fixed-point logic:
+
+- standardized palette, small adjustable labels and simple top-right `Meridian -- Futures Setups` HUD;
+- added `Automatic` / `Manual` zone-source mode with a compact chart-dependent HTF source ladder;
+- added bounded historical zone-size percentiles on top of source-ATR normalization; extremely small/large distribution tails receive less authority;
+- strengthened **causal event linkage** so an ordered liquidity sweep → structure/MSS → displacement sequence receives explicit chain authority rather than treating the events as unrelated checkboxes;
+- enhanced same-direction overlap with extra authority when breaker/OB structure overlaps FVG/IFVG imbalance (`Zone Overlap Quality` concept);
+- records the nearest eligible opposing objective in hypothesis evidence after objective-space qualification;
+- research zones now use `BUILDING → CONFIRMED → INVALIDATED` visual semantics: gray ghost state while below the live threshold, directional color once qualified, and faded/frozen invalid history;
+- retained correctly bounded IFVG and BB transformation lifetimes, first-touch/structural-leg gates and confirmed HTF payloads.
+
+## Zone sources and lifecycle
+
+The engine can register chart, 5m, 15m, 30m, 1H and 4H FVG/OB zones. An FVG can transform to IFVG after confirmed failure; an OB can transform to a Breaker Block. Transformed zones receive a new reduced timer rather than inheriting the old zone's remaining life.
+
+Automatic source mode keeps the active source ladder compact for the execution chart; Manual mode exposes the individual source toggles.
+
+## Liquidity and causal chain
+
+Liquidity evidence can come from repeated-pivot pools and objective references including prior day/week, overnight and Opening Range levels. A sweep event is only one part of the chain.
+
+The strongest execution evidence follows:
 
 ```text
-Market: NQ or ES
-Primary chart: 1 minute, standard candles
-Accepted working charts: 2–5 minutes when explicitly allowed
-Extended hours: enabled
-Timezone: America/New_York
-Futures session: 18:00–17:00 ET
-Signal window: 08:00–16:00 ET
-Minimum score: 80
-Minimum independent categories: 4
-Entry mode: Rejection close
-Require first qualified touch: enabled
-Maximum active trades: 1
+liquidity sweep
+      ↓
+BOS / MSS confirmation
+      ↓
+directional displacement
+      ↓
+qualified FVG / IFVG / OB / BB interaction
 ```
 
-Zone detection can continue across the configured full futures session. The signal window only controls when a new trade hypothesis can qualify.
+The model gives more authority when those events occur in causal order within their configured validity windows.
 
-## Engine layers
+Repeated-pivot pools are OHLC-derived proxies for clustered structural liquidity. They are not DOM/order-book liquidity.
 
-1. **Zone detection:** FVG, IFVG, OB and BB registration.
-2. **Confluence analysis:** authority, overlap, structure, liquidity and context.
-3. **Qualification:** score, category, timing, stop and objective gates.
-4. **Lifecycle:** entry geometry, target/stop state, expiry and cleanup.
+## Scoring
 
-No single concept can create a trade by itself.
+The score remains capped at 100 and still requires independent evidence categories. Major families are:
 
-## Zone engine
+- zone authority, now including ATR-normalized size distribution quality;
+- multi-timeframe / zone overlap;
+- execution structure, displacement and causal-chain quality;
+- liquidity and objective references;
+- context (VWAP/regime/z-score/RSI/RVOL);
+- intermarket/session support including confirmed NQ/ES SMT.
 
-### Timeframes
-
-The engine can register chart, 5-minute, 15-minute, 30-minute, 1-hour and 4-hour zones. Higher-timeframe payloads use completed source bars. The zone becomes actionable when the completed information first reaches the chart.
-
-### Fair Value Gap
-
-A bullish FVG is a three-candle imbalance where the newer candle's low is above the older candle's high. A bearish FVG is the inverse. The engine records direction, boundaries, midpoint, source timeframe, ATR, detection time, expiry, touches, fill and state.
-
-### Inversion FVG
-
-An FVG can transform into an IFVG after a confirmed close through its invalidating boundary. The transformation reverses direction and resets expiry to a configurable fraction of the transformed zone's normal lifetime.
-
-### Order Block and Breaker Block
-
-The OB model uses the immediate opposing candle before confirmed displacement and a source-timeframe structure break. A BB is created when a registered OB fails through its invalidating boundary. Neither concept is assigned to every opposite-colored candle.
-
-### Size and lifetime
-
-Zone width is normalized by source-timeframe ATR. Zones outside the configured tick or ATR limits are rejected. Lifetime can be fixed by timeframe or scaled by authority. Four-hour zones can optionally persist to the futures-session close.
-
-## Meridian Choice score
-
-The total score is capped at 100 and is not a probability.
-
-| Category | Maximum | Evidence |
-|---|---:|---|
-| Zone authority | 30 | Source timeframe, type and ATR-normalized width |
-| Multi-timeframe overlap | 25 | Same-direction overlap and nesting |
-| Execution structure | 20 | BOS/MSS and displacement |
-| Liquidity and structure | 15 | Sweeps, repeated-wick pools, major references and freshness |
-| Context | 10 | VWAP, higher-timeframe regime, z-score, RSI and RVOL |
-| Intermarket and session | 5 | NQ/ES SMT, PO3 proxy and Opening Range behavior |
-
-### Authority
-
-Base authority rises with timeframe: chart 5, 5-minute 8, 15-minute 12, 30-minute 15, 1-hour 18 and 4-hour 22. OB, IFVG and BB types receive additional authority, and normalized width can add a small capped contribution.
-
-### Overlap
-
-Same-direction zones receive points when price ranges overlap. Full nesting can add further weight. The category cap prevents a large collection of correlated zones from overwhelming other evidence.
-
-### Structure and displacement
-
-The chart execution layer evaluates confirmed Break of Structure, Market Structure Shift and recent directional displacement. MSS has greater authority than ordinary BOS. Structure and displacement can remain mandatory gates even when their points are already included in the score.
-
-### Liquidity
-
-Evidence can include previous-day/week levels, overnight structure, Opening Range, confirmed pivots, recent sweeps and repeated-wick pools. Repeated-wick pools are OHLC-derived clustering proxies, not resting-order or Depth of Market data.
-
-### Context
-
-The engine evaluates full-session and RTH VWAP behavior, confirmed multi-timeframe regime values, rolling z-score, RSI and same-time RVOL. Context contributions are intentionally capped so they cannot replace zone and structure quality.
-
-### Intermarket and session
-
-NQ/ES SMT compares confirmed pivot behavior between the chart and paired symbol. The PO3 component is a session-state proxy. Opening Range behavior can add a small contribution. These are supporting inputs, not standalone triggers.
-
-## Independent-category requirement
-
-A candidate must pass both the total score threshold and the minimum number of independent evidence categories. This reduces the chance that many correlated points from one concept qualify a trade.
+Breaker/OB overlap with FVG/IFVG can strengthen overlap authority, but no overlap pattern can bypass the mandatory live gates by itself.
 
 ## Mandatory live gates
 
-Depending on settings, a live candidate can require:
+Depending on settings a hypothesis can require:
 
-- supported market and chart timeframe;
-- confirmed chart bar inside the signal window;
-- active, unexpired and correctly directed zone;
-- touch-count and first-qualified-touch compliance;
+- supported symbol/timeframe and confirmed chart bar;
+- signal window;
+- active unexpired zone;
+- touch-count and structural-leg availability;
 - recent structure and displacement;
-- minimum score and category count;
-- valid stop distance in ticks and ATR;
-- sufficient objective space;
-- active-trade and structural-leg availability.
+- score and independent-category minimums;
+- valid stop geometry;
+- sufficient space to the nearest eligible opposing structural objective;
+- active-trade/cooldown limits.
 
-The strongest candidate on the confirmed bar is selected. Lower-ranked candidates do not create simultaneous duplicate hypotheses.
+The highest-scoring qualifying candidate wins the bar.
 
-## Entry and risk
+## Targets and lifecycle
 
-Entry modes include first touch, midpoint reclaim and rejection close. Stop placement uses the selected zone and configured buffer rules, then applies minimum/maximum tick and ATR filters. Targets are displayed at 1R, 1.5R and 2R. Objective-space checks can reject a candidate when a major opposing reference leaves insufficient room.
+The chart continues to show 1R, 1.5R and 2R analytical geometry. The engine also calculates the nearest eligible opposing liquidity/reference objective for the qualification gate and records it in hypothesis evidence.
 
-## Trade lifecycle
+Trade geometry freezes when the hypothesis stops, reaches 2R or reaches its configured time expiry. Historical drawings then fade and are deleted according to bounded retention settings.
 
-A created hypothesis stores its source zone, score, category count, entry, stop, targets, start and expiry. The engine updates target and stop state on confirmed bars, retains completed drawings for a bounded period, and deletes old objects when retention caps are reached.
+## Research visuals
 
-This is chart analytics, not order management. Intrabar path and slippage are not modeled as broker fills.
+The research build can show gray `BUILDING` zones below the live score threshold, directional `CONFIRMED` zones, invalidated history, liquidity-pool lines and rejected candidate labels. These visuals do not change live eligibility.
 
-## Research output
+## Recommended setup
 
-The research build can show:
-
-- active zones and their timeframe/type labels;
-- score tooltips and breakdowns;
-- relevant liquidity-pool lines;
-- rejected touched candidates and reasons;
-- candidate, signal, target and stop totals;
-- outcome counts by score bucket.
-
-Use it to diagnose one rule at a time. Research counters are descriptive and are not a substitute for a dedicated backtester.
+```text
+Market: NQ or ES (micro equivalents supported)
+Primary chart: 1 minute
+Optional diagnostic chart: 2–5 minutes when enabled
+Extended hours: enabled
+Futures session: 18:00–17:00 ET
+Signal window: 08:00–16:00 ET
+Source mode: Automatic
+Minimum score: 80
+Minimum categories: 4
+Entry mode: Rejection close
+```
 
 ## Alerts
 
-Static conditions cover BUY, SELL, 2R target and stop events. Optional dynamic JSON includes version, build, direction, source zone, score and trade geometry. Data is only delivered after the user creates a TradingView alert.
-
-## Confirmed-data model
-
-Signals occur on confirmed chart bars. Daily, weekly and higher-timeframe zone inputs use completed source data. Confirmed pivots appear after their right-side confirmation window. Developing session values can still change until their source window closes.
+Confirmed conditions cover BUY, SELL, 2R target and stop events. Optional JSON includes build, zone type, score and evidence.
 
 ## Limitations
 
-- Beta rules, weights and lifecycle behavior can change.
-- The script is not a broker strategy and does not model commissions, slippage or fill priority.
-- OHLC-derived liquidity is not order-book liquidity.
-- Continuous-contract adjustments can alter historical zones.
-- Research results require Bar Replay and live observation before any inference about performance.
-- A score is structured evidence, not a forecast probability.
-
-## Validation checklist
-
-Before changing status from beta, validate:
-
-1. chart and higher-timeframe zone registration timing;
-2. FVG-to-IFVG and OB-to-BB transformation lifetime;
-3. first-touch and structural-leg locks;
-4. stop/objective gates across NQ, MNQ, ES and MES;
-5. daily/research build parity;
-6. Bar Replay behavior around session boundaries;
-7. live alerts and terminal trade-state cleanup;
-8. score-bucket outcomes in a separate research process.
+The beta engine does not model commissions, slippage, fill priority or intrabar path. OHLC-derived liquidity is not order-book liquidity. Zone-size percentiles require warm-up history. Continuous-contract adjustments can alter historical zones. The model requires Bar Replay and live validation before performance claims.
