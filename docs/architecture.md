@@ -8,12 +8,12 @@ Meridian is organized as a set of independent indicators rather than a single mo
 
 | Layer | Primary responsibility |
 |---|---|
-| Levels | Objective price references and session structure |
-| Context | Participation, momentum, volatility, trend quality and regime |
-| Profile | TPO value, distribution shape and auction-state descriptions |
-| Setups | Multi-timeframe zone qualification and trade-hypothesis lifecycle |
+| Levels | Objective price references, reaction zones and session structure |
+| Context | Participation, momentum, volatility, trend quality, regime and compact intermarket context |
+| Profile | TPO value, distribution shape, Initial Balance quality and auction-state descriptions |
+| Setups | Multi-timeframe zone qualification, causal event evidence and trade-hypothesis lifecycle |
 
-This separation keeps chart roles understandable and prevents one experimental engine from destabilizing otherwise mature scripts.
+This separation keeps chart roles understandable and prevents one experimental engine from destabilizing otherwise mature scripts. The catalog-wide visual contract is documented in [the Meridian design system](./design-system.md).
 
 ## Source layout
 
@@ -23,7 +23,7 @@ The deprecated multi-strategy Futures Setups v0.2 implementation is intentionall
 
 ## Session engines
 
-The scripts define explicit sessions and timezones instead of assuming the chart's visual session is sufficient. Session-derived values reset at detected boundaries and remain bounded to the configured trading day.
+The scripts define explicit sessions and timezones instead of assuming the chart's visual session is sufficient. Session-derived values reset using explicit session or trading-day identities rather than assuming an out-of-session chart bar will always exist between sessions. This is important on RTH-only ETF charts and overnight futures feeds with maintenance gaps.
 
 Session precision depends on chart bars intersecting the configured boundaries. A 1-minute chart provides more precise Opening Range and Initial Balance boundaries than a coarse chart.
 
@@ -41,6 +41,7 @@ Futures Levels, Profile and Setups retain state across bars. Examples include:
 - level acceptance and rejection states;
 - profile rows and completed-profile references;
 - zone state, transformation, expiry and fill percentage;
+- linked setup evidence such as liquidity, structure and displacement timing;
 - trade-hypothesis targets, stops and terminal outcomes.
 
 Arrays and drawing objects are capped. Cleanup routines delete expired or superseded drawings to prevent uncontrolled object growth.

@@ -33,7 +33,7 @@ Pivot highs and lows require bars to the right of the pivot. A pivot marker ther
 
 ## Current-bar alerts
 
-Most critical state changes are evaluated on confirmed chart bars. TradingView alert frequency and the user's selected alert mode still matter. For consistent behavior, use **Once Per Bar Close** unless an indicator guide explicitly states otherwise.
+Most critical persistent state changes are evaluated on confirmed chart bars. TradingView alert frequency and the user's selected alert mode still matter. For consistent behavior, use **Once Per Bar Close** unless an indicator guide explicitly states otherwise.
 
 ## Same-time relative volume
 
@@ -41,9 +41,9 @@ Same-time RVOL compares current activity with equivalent intraday slots from pri
 
 Options Context uses TradingView's published `ta` library. Futures Context uses bounded circular arrays and does not insert the current session into its own baseline until bars are confirmed.
 
-## External symbols and relative strength
+## External symbols and intermarket context
 
-Futures Context and Futures Setups can request a paired futures symbol, normally NQ versus ES. Results depend on the selected data feed, symbol continuity and session alignment. A missing or invalid comparison symbol can disable or degrade the relative-strength component without invalidating unrelated calculations.
+Futures Context can compare the chart market with multiple index-futures peers, including NQ, ES, YM and RTY, using rolling correlation, beta-adjusted residuals and standardized residual behavior. Futures Setups retains its focused NQ/ES SMT comparison for setup confluence. Results depend on the selected data feed, symbol continuity and session alignment. Missing or invalid peer data should degrade only the affected intermarket component rather than invalidating unrelated calculations.
 
 ## Standard versus synthetic candles
 
