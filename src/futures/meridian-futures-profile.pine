@@ -1,9 +1,9 @@
 //@version=6
 // SPDX-License-Identifier: MPL-2.0
-// Meridian — Futures Profile · v0.1.2
+// Meridian — Futures Profile · v0.2.0
 
 indicator(
-     title = "Meridian — Futures Profile",
+     title = "Meridian - Futures Profile",
      shorttitle = "Meridian Futures Profile",
      overlay = true,
      format = format.price,
@@ -21,9 +21,10 @@ const string G_DISPLAY = "04 — Profile Display"
 const string G_LEVELS  = "05 — Levels + Structure"
 const string G_VOLUME  = "06 — Estimated Volume Profile"
 const string G_AMT     = "07 — Auction Classification"
-const string G_THEME   = "08 — Meridian Theme"
-const string G_DASH    = "09 — Dashboard"
-const string G_ALERTS  = "10 — Alerts + Telemetry"
+const string G_IBQUAL  = "08 — Initial Balance Quality"
+const string G_THEME   = "09 — Meridian Theme"
+const string G_DASH    = "10 — Dashboard"
+const string G_ALERTS  = "11 — Alerts + Telemetry"
 
 bool indicatorEnabled = input.bool(true, "Enable indicator", group = G_GENERAL)
 string sessionTimezone = input.string("America/New_York", "Analysis time zone", group = G_GENERAL)
@@ -88,34 +89,32 @@ float shapeSkewThreshold = input.float(0.45, "P / b shape skew threshold", minva
 float trendRangeExtension = input.float(1.75, "Trend-profile range / IB", minval = 1.1, maxval = 5.0, step = 0.05, group = G_AMT)
 float strongPocMigrationRows = input.float(2.0, "Strong POC migration (rows)", minval = 0.5, maxval = 10.0, step = 0.5, group = G_AMT)
 
-color accentColor = input.color(color.rgb(168, 85, 247), "Meridian accent", group = G_THEME)
-color secondaryColor = input.color(color.rgb(99, 102, 241), "Secondary accent", group = G_THEME)
-color valueAreaColor = input.color(color.rgb(139, 92, 246), "Current value area", group = G_THEME)
-color outsideValueColor = input.color(color.rgb(51, 65, 85), "Current outside value", group = G_THEME)
-color previousValueColor = input.color(color.rgb(91, 75, 138), "Previous value area", group = G_THEME)
-color previousOutsideColor = input.color(color.rgb(38, 45, 63), "Previous outside value", group = G_THEME)
-color pocColor = input.color(color.rgb(244, 114, 182), "TPO POC", group = G_THEME)
-color developingColor = input.color(color.rgb(34, 211, 238), "Developing levels", group = G_THEME)
-color singlePrintColor = input.color(color.rgb(249, 168, 212), "Single prints", group = G_THEME)
-color poorColor = input.color(color.rgb(245, 158, 11), "Poor high / low", group = G_THEME)
-color bullishColor = input.color(color.rgb(34, 197, 94), "Bullish migration", group = G_THEME)
-color bearishColor = input.color(color.rgb(239, 68, 68), "Bearish migration", group = G_THEME)
-color neutralColor = input.color(color.rgb(148, 163, 184), "Neutral", group = G_THEME)
-color panelColor = input.color(color.rgb(15, 23, 42), "Dashboard background", group = G_THEME)
-color textColor = input.color(color.rgb(241, 245, 249), "Text", group = G_THEME)
-int profileTransparency = input.int(28, "Profile transparency", minval = 0, maxval = 90, group = G_THEME)
-int previousProfileTransparency = input.int(48, "Previous profile transparency", minval = 0, maxval = 95, group = G_THEME)
+int ibQualityHistorySessions = input.int(40, "IB quality history", minval = 10, maxval = 120, group = G_IBQUAL)
+float ibNarrowPercentile = input.float(25.0, "Narrow threshold percentile", minval = 5.0, maxval = 45.0, step = 1.0, inline = "ibclass", group = G_IBQUAL)
+float ibWidePercentile = input.float(75.0, "Wide", minval = 55.0, maxval = 95.0, step = 1.0, inline = "ibclass", group = G_IBQUAL)
+float ibExtremePercentile = input.float(90.0, "Extreme", minval = 70.0, maxval = 99.0, step = 1.0, inline = "ibclass2", group = G_IBQUAL)
 
-bool showDashboard = input.bool(true, "Show Profile dashboard", group = G_DASH)
-bool dashboardWithFuturesLevels = input.bool(true, "Layout with Futures Levels", group = G_DASH,
-     tooltip = "When enabled, the Profile dashboard uses the top-right corner so it stacks above the Futures Levels dashboard, which normally occupies the bottom-right corner. Pine tables cannot be pixel-offset beside another script's table.")
-string dashboardPosition = input.string("Bottom Right", "Standalone dashboard position", options = ["Top Right", "Top Left", "Bottom Right", "Bottom Left", "Middle Right", "Middle Left"], group = G_DASH,
-     tooltip = "Used only when Layout with Futures Levels is disabled.")
-string dashboardTextSize = input.string("Small", "Dashboard text size", options = ["Tiny", "Small", "Normal", "Large"], group = G_DASH)
-int dashboardColumnWidth = input.int(11, "Dashboard column width (%)", minval = 8, maxval = 20, group = G_DASH)
-int dashboardHeaderHeight = input.int(4, "Header height (%)", minval = 2, maxval = 10, group = G_DASH)
-int dashboardCardHeight = input.int(7, "Card row height (%)", minval = 4, maxval = 14, group = G_DASH)
-int dashboardFooterHeight = input.int(2, "Footer height (%)", minval = 1, maxval = 6, group = G_DASH)
+color accentColor = input.color(#8B5CF6, "Brand / header", group = G_THEME)
+color secondaryColor = input.color(#C4B5FD, "Secondary", group = G_THEME)
+color valueAreaColor = input.color(#8B5CF6, "Current value area", group = G_THEME)
+color outsideValueColor = input.color(#334155, "Current outside value", group = G_THEME)
+color previousValueColor = input.color(#C4B5FD, "Previous value area", group = G_THEME)
+color previousOutsideColor = input.color(#334155, "Previous outside value", group = G_THEME)
+color pocColor = input.color(#38BDF8, "TPO POC / information", group = G_THEME)
+color developingColor = input.color(#A1A1AA, "Developing", group = G_THEME)
+color singlePrintColor = input.color(#38BDF8, "Single prints", group = G_THEME)
+color poorColor = input.color(#FBBF24, "Warning / poor high-low", group = G_THEME)
+color bullishColor = input.color(#2DD4BF, "Bullish migration", group = G_THEME)
+color bearishColor = input.color(#F87171, "Bearish migration", group = G_THEME)
+color neutralColor = input.color(#94A3B8, "Neutral", group = G_THEME)
+color panelColor = input.color(#090E17, "Dashboard background", group = G_THEME)
+color borderColor = input.color(#334155, "Dashboard border", group = G_THEME)
+color textColor = input.color(#F8FAFC, "Text", group = G_THEME)
+int profileTransparency = input.int(84, "Current profile transparency", minval = 70, maxval = 95, group = G_THEME)
+int previousProfileTransparency = input.int(90, "Previous profile transparency", minval = 75, maxval = 98, group = G_THEME)
+
+bool showDashboard = input.bool(true, "Show dashboard", group = G_DASH)
+string dashboardTextSize = input.string("Small", "Dashboard text size", options = ["Tiny", "Small", "Normal"], group = G_DASH)
 
 bool enableDynamicAlerts = input.bool(false, "Enable dynamic JSON alert() calls", group = G_ALERTS)
 bool alertPreviousLevels = input.bool(true, "Alert on previous POC / VAH / VAL", group = G_ALERTS)
@@ -129,24 +128,22 @@ f_line_style(string name) =>
         "Dotted" => line.style_dotted
         => line.style_dashed
 
-f_table_position(string name) =>
-    switch name
-        "Top Left"     => position.top_left
-        "Bottom Right" => position.bottom_right
-        "Bottom Left"  => position.bottom_left
-        "Middle Right" => position.middle_right
-        "Middle Left"  => position.middle_left
-        => position.top_right
-
-f_dashboard_position(bool withFuturesLevels, string standalonePosition) =>
-    withFuturesLevels ? position.top_right : f_table_position(standalonePosition)
-
 f_text_size(string name) =>
     switch name
         "Tiny"   => size.tiny
         "Normal" => size.normal
-        "Large"  => size.large
         => size.small
+
+f_percentile_rank(array<float> history, float value) =>
+    float result = na
+    int count = history.size()
+    if count >= 5 and not na(value)
+        int atOrBelow = 0
+        for i = 0 to count - 1
+            if history.get(i) <= value
+                atOrBelow += 1
+        result := 100.0 * atOrBelow / count
+    result
 
 f_block_minutes(string name) =>
     switch name
@@ -518,6 +515,14 @@ var float previousRotationFactor = 0.0
 var int currentCommittedBlocks = 0
 var int previousCommittedBlocks = 0
 
+var array<float> ibRangeHistory = array.new_float()
+var array<float> ibVolumeHistory = array.new_float()
+var float currentIbVolume = 0.0
+var float currentIbRangePercentile = na
+var float currentIbVolumePercentile = na
+var float currentIbEfficiency = na
+var bool currentIbRecorded = false
+
 var int activeBlockId = -1
 var float activeBlockHigh = na
 var float activeBlockLow = na
@@ -526,22 +531,23 @@ var float lastCommittedBlockLow = na
 
 if newRTH
     if currentHasData
-        if activeBlockId >= 0 and not na(activeBlockHigh) and not na(activeBlockLow) and not na(currentRowSize)
-            int finalLowRow = int(math.floor(activeBlockLow / currentRowSize))
-            int finalHighRow = int(math.floor(activeBlockHigh / currentRowSize))
-            [newMinRow, newMaxRow, blockOverflow] = f_add_tpo_block(currentTpo, finalLowRow, finalHighRow, currentMinRow, currentMaxRow)
-            currentMinRow := newMinRow
-            currentMaxRow := newMaxRow
-            currentOverflow := currentOverflow or blockOverflow
-            if not na(lastCommittedBlockHigh)
-                currentRotationFactor += activeBlockHigh > lastCommittedBlockHigh ? 1.0 : activeBlockHigh < lastCommittedBlockHigh ? -1.0 : 0.0
-                currentRotationFactor += activeBlockLow > lastCommittedBlockLow ? 1.0 : activeBlockLow < lastCommittedBlockLow ? -1.0 : 0.0
-            currentCommittedBlocks += 1
-            lastCommittedBlockHigh := activeBlockHigh
-            lastCommittedBlockLow := activeBlockLow
-        currentClose := bar_index > 0 ? close[1] : close
-        currentSessionEndBar := bar_index > 0 ? bar_index - 1 : bar_index
-        currentComplete := true
+        if not currentComplete
+            if activeBlockId >= 0 and not na(activeBlockHigh) and not na(activeBlockLow) and not na(currentRowSize)
+                int finalLowRow = int(math.floor(activeBlockLow / currentRowSize))
+                int finalHighRow = int(math.floor(activeBlockHigh / currentRowSize))
+                [newMinRow, newMaxRow, blockOverflow] = f_add_tpo_block(currentTpo, finalLowRow, finalHighRow, currentMinRow, currentMaxRow)
+                currentMinRow := newMinRow
+                currentMaxRow := newMaxRow
+                currentOverflow := currentOverflow or blockOverflow
+                if not na(lastCommittedBlockHigh)
+                    currentRotationFactor += activeBlockHigh > lastCommittedBlockHigh ? 1.0 : activeBlockHigh < lastCommittedBlockHigh ? -1.0 : 0.0
+                    currentRotationFactor += activeBlockLow > lastCommittedBlockLow ? 1.0 : activeBlockLow < lastCommittedBlockLow ? -1.0 : 0.0
+                currentCommittedBlocks += 1
+                lastCommittedBlockHigh := activeBlockHigh
+                lastCommittedBlockLow := activeBlockLow
+            currentClose := bar_index > 0 ? close[1] : close
+            currentSessionEndBar := bar_index > 0 ? bar_index - 1 : bar_index
+            currentComplete := true
 
         previousTpo := currentTpo.copy()
         previousEstimatedVolume := currentEstimatedVolume.copy()
@@ -578,6 +584,11 @@ if newRTH
     currentLow := low
     currentIbHigh := na
     currentIbLow := na
+    currentIbVolume := 0.0
+    currentIbRangePercentile := na
+    currentIbVolumePercentile := na
+    currentIbEfficiency := na
+    currentIbRecorded := false
     currentRotationFactor := 0.0
     currentCommittedBlocks := 0
     activeBlockId := -1
@@ -593,6 +604,22 @@ if inRTH and currentHasData and not na(currentRowSize)
     if currentBlockId >= 0 and currentBlockId < initialBalanceBlocks
         currentIbHigh := na(currentIbHigh) ? high : math.max(currentIbHigh, high)
         currentIbLow := na(currentIbLow) ? low : math.min(currentIbLow, low)
+        if barstate.isconfirmed
+            currentIbVolume += nz(volume, 0.0)
+
+    if currentBlockId >= initialBalanceBlocks and not currentIbRecorded and not na(currentIbHigh) and not na(currentIbLow)
+        float completedIbRange = currentIbHigh - currentIbLow
+        currentIbRangePercentile := f_percentile_rank(ibRangeHistory, completedIbRange)
+        currentIbVolumePercentile := f_percentile_rank(ibVolumeHistory, currentIbVolume)
+        float ibEndClose = bar_index > 0 ? close[1] : close
+        currentIbEfficiency := completedIbRange > syminfo.mintick ? math.min(1.0, math.abs(ibEndClose - currentOpen) / completedIbRange) * 100.0 : 0.0
+        ibRangeHistory.push(completedIbRange)
+        ibVolumeHistory.push(currentIbVolume)
+        while ibRangeHistory.size() > ibQualityHistorySessions
+            ibRangeHistory.shift()
+        while ibVolumeHistory.size() > ibQualityHistorySessions
+            ibVolumeHistory.shift()
+        currentIbRecorded := true
 
     if activeBlockId < 0
         activeBlockId := currentBlockId
@@ -624,7 +651,7 @@ if inRTH and currentHasData and not na(currentRowSize)
         bool volumeOverflow = f_add_estimated_volume(currentEstimatedVolume, barLowRow, barHighRow, volume)
         currentOverflow := currentOverflow or volumeOverflow
 
-if endRTH and currentHasData and activeBlockId >= 0 and not na(currentRowSize)
+if endRTH and currentHasData and not currentComplete and activeBlockId >= 0 and not na(currentRowSize)
     int finalLowRow = int(math.floor(activeBlockLow / currentRowSize))
     int finalHighRow = int(math.floor(activeBlockHigh / currentRowSize))
     [newMinRow, newMaxRow, blockOverflow] = f_add_tpo_block(currentTpo, finalLowRow, finalHighRow, currentMinRow, currentMaxRow)
@@ -1014,8 +1041,8 @@ if barstate.islast
     f_set_level(keyLines, keyLabels, 1, indicatorEnabled and showCurrentLevels and curValid, currentStart, currentLevelEnd, curVah, "TPO VAH", developingColor, line.style_dashed, levelLineWidth)
     f_set_level(keyLines, keyLabels, 2, indicatorEnabled and showCurrentLevels and curValid, currentStart, currentLevelEnd, curVal, "TPO VAL", developingColor, line.style_dashed, levelLineWidth)
     f_set_level(keyLines, keyLabels, 3, indicatorEnabled and showProfileMidpoint and curValid, currentStart, currentLevelEnd, curProfileMid, "TPO MID", color.new(accentColor, 18), line.style_dotted, 1)
-    f_set_level(keyLines, keyLabels, 4, indicatorEnabled and showInitialBalance and not na(currentIbHigh), currentStart, currentLevelEnd, currentIbHigh, "IBH", color.new(secondaryColor, 8), line.style_solid, levelLineWidth)
-    f_set_level(keyLines, keyLabels, 5, indicatorEnabled and showInitialBalance and not na(currentIbLow), currentStart, currentLevelEnd, currentIbLow, "IBL", color.new(secondaryColor, 8), line.style_solid, levelLineWidth)
+    f_set_level(keyLines, keyLabels, 4, indicatorEnabled and showInitialBalance and not na(currentIbHigh), currentStart, currentLevelEnd, currentIbHigh, "IBH", color.new(secondaryColor, currentIbRecorded ? 8 : 28), currentIbRecorded ? line.style_solid : line.style_dashed, levelLineWidth)
+    f_set_level(keyLines, keyLabels, 5, indicatorEnabled and showInitialBalance and not na(currentIbLow), currentStart, currentLevelEnd, currentIbLow, "IBL", color.new(secondaryColor, currentIbRecorded ? 8 : 28), currentIbRecorded ? line.style_solid : line.style_dashed, levelLineWidth)
 
     color prevPocColor = previousPocState == 1 or previousPocState == 2 ? bullishColor : previousPocState == -1 or previousPocState == -2 ? bearishColor : previousPocTouched ? poorColor : previousValueColor
     color prevVahColor = previousVahState == 1 ? bullishColor : previousVahState == -2 ? bearishColor : previousVahTouched ? poorColor : previousValueColor
@@ -1049,73 +1076,50 @@ string structureState = not curValid ? "No Profile" :
 string ibState = not curValid or na(currentIbHigh) or na(currentIbLow) ? "IB Developing" :
      close > currentIbHigh ? "Above IB" : close < currentIbLow ? "Below IB" : "Inside IB"
 
-string valueDetail = pocMigration + " POC\nVA " + str.tostring(curVah - curVal, format.mintick)
-string profileDetail = "Skew " + str.tostring(curSkewness, "#.##") + " · RF " + str.tostring(currentRotationFactor, "#.0")
-string structureDetail = "Singles " + str.tostring(curSingleRows) + " · TPO " + str.tostring(curTotalTpo)
-string locationDetail = currentLocation + "\n" + ibState
-string openDetail = openingLocation + "\nOpen " + (na(currentOpen) ? "—" : str.tostring(currentOpen, format.mintick))
+string ibQuality = not currentIbRecorded or na(currentIbRangePercentile) ? "BUILDING" :
+     currentIbRangePercentile >= ibExtremePercentile ? "EXTREME" :
+     currentIbRangePercentile >= ibWidePercentile ? "WIDE" :
+     currentIbRangePercentile <= ibNarrowPercentile ? "NARROW" : "NORMAL"
+string ibDetail = not currentIbRecorded ? "Developing" :
+     ibQuality + " · " + str.tostring(currentIbRangePercentile, "#") + "p" +
+     (na(currentIbVolumePercentile) ? "" : " · Vol " + str.tostring(currentIbVolumePercentile, "#") + "p")
+
+bool dataStale = barstate.islast and timenow > time_close + math.max(60 * 60 * 1000, int(timeframe.in_seconds() * 1000.0 * 4.0))
+string dataState = dataStale ? "STALE / CLOSED" : barstate.isrealtime and not barstate.isconfirmed ? "LIVE" : "CONFIRMED"
+string profileState = curValid ? curShapeText : "BUILDING"
+string valueState = valueRelationship + " · " + pocMigration + " POC"
+string locationState = currentLocation + " · " + ibState
+string warningState = chartWarning ? "CHECK CHART" : currentOverflow or previousOverflow ? "ROW DENSITY" : dataState
 
 var table dashboard = table.new(
-     f_dashboard_position(dashboardWithFuturesLevels, dashboardPosition), 2, 5,
-     bgcolor = color.new(panelColor, 100),
-     frame_color = color.new(accentColor, 100), frame_width = 1,
-     border_color = color.new(neutralColor, 100), border_width = 1)
-
-if barstate.isfirst
-    table.merge_cells(dashboard, 0, 0, 1, 0)
-    table.merge_cells(dashboard, 0, 4, 1, 4)
+     position.top_right, 2, 7,
+     bgcolor = color.new(panelColor, 8),
+     frame_color = color.new(borderColor, 25), frame_width = 1,
+     border_color = color.new(borderColor, 78), border_width = 1)
 
 if barstate.islast
     bool visible = indicatorEnabled and showDashboard
     color invisible = color.new(panelColor, 100)
-    color dashboardBackground = visible ? color.new(panelColor, 8) : invisible
-    color dashboardText = visible ? textColor : color.new(textColor, 100)
-    color dashboardMuted = visible ? color.new(textColor, 25) : color.new(textColor, 100)
-    string layoutTag = dashboardWithFuturesLevels ? "Stacked" : "Standalone"
-    string footer = chartWarning ? "Use standard intraday candles with chart timeframe ≤ TPO block size" :
-         (currentOverflow or previousOverflow ? "Row-density warning · Increase ticks per row" : "RTH · " + blockSizeInput + " · " + str.tostring(int(math.round(currentRowSize / syminfo.mintick))) + " ticks/row · " + layoutTag)
-
-    table.set_bgcolor(dashboard, dashboardBackground)
-    table.set_frame_color(dashboard, visible ? color.new(accentColor, 28) : color.new(accentColor, 100))
-    table.set_border_color(dashboard, visible ? color.new(neutralColor, 82) : color.new(neutralColor, 100))
-
-    table.cell(dashboard, 0, 0, "MERIDIAN  —  FUTURES PROFILE",
-         width = dashboardColumnWidth * 2, height = dashboardHeaderHeight,
-         bgcolor = visible ? color.new(accentColor, 14) : invisible,
-         text_color = dashboardText, text_size = f_text_size(dashboardTextSize), text_halign = text.align_center)
-
-    table.cell(dashboard, 0, 1, "AUCTION\n" + auctionState + "\n" + participantBehavior,
-         width = dashboardColumnWidth, height = dashboardCardHeight,
-         bgcolor = visible ? color.new(auctionColor, 78) : invisible,
-         text_color = dashboardText, text_size = f_text_size(dashboardTextSize), text_halign = text.align_left, text_valign = text.align_center)
-    table.cell(dashboard, 1, 1, "VALUE\n" + valueRelationship + "\n" + valueDetail,
-         width = dashboardColumnWidth, height = dashboardCardHeight,
-         bgcolor = visible ? color.new(migrationColor, 82) : invisible,
-         text_color = dashboardText, text_size = f_text_size(dashboardTextSize), text_halign = text.align_left, text_valign = text.align_center)
-
-    table.cell(dashboard, 0, 2, "PROFILE SHAPE\n" + curShapeText + "\n" + profileDetail,
-         width = dashboardColumnWidth, height = dashboardCardHeight,
-         bgcolor = visible ? color.new(accentColor, 84) : invisible,
-         text_color = dashboardText, text_size = f_text_size(dashboardTextSize), text_halign = text.align_left, text_valign = text.align_center)
-    table.cell(dashboard, 1, 2, "STRUCTURE\n" + structureState + "\n" + structureDetail,
-         width = dashboardColumnWidth, height = dashboardCardHeight,
-         bgcolor = visible ? color.new(curPoorHigh or curPoorLow ? poorColor : singlePrintColor, 86) : invisible,
-         text_color = dashboardText, text_size = f_text_size(dashboardTextSize), text_halign = text.align_left, text_valign = text.align_center)
-
-    table.cell(dashboard, 0, 3, "OPEN\n" + openDetail,
-         width = dashboardColumnWidth, height = dashboardCardHeight,
-         bgcolor = visible ? color.new(secondaryColor, 86) : invisible,
-         text_color = dashboardText, text_size = f_text_size(dashboardTextSize), text_halign = text.align_left, text_valign = text.align_center)
-    table.cell(dashboard, 1, 3, "LOCATION\n" + locationDetail + "\nAbove/Below POC " + str.tostring(curTpoAbove) + "/" + str.tostring(curTpoBelow),
-         width = dashboardColumnWidth, height = dashboardCardHeight,
-         bgcolor = visible ? color.new(currentLocation == "Above Value" ? bullishColor : currentLocation == "Below Value" ? bearishColor : neutralColor, 86) : invisible,
-         text_color = dashboardText, text_size = f_text_size(dashboardTextSize), text_halign = text.align_left, text_valign = text.align_center)
-
-    table.cell(dashboard, 0, 4, footer,
-         width = dashboardColumnWidth * 2, height = dashboardFooterHeight,
-         bgcolor = visible ? color.new(panelColor, 14) : invisible,
-         text_color = chartWarning or currentOverflow or previousOverflow ? (visible ? poorColor : color.new(poorColor, 100)) : dashboardMuted,
-         text_size = size.tiny, text_halign = text.align_center)
+    color bg = visible ? color.new(panelColor, 8) : invisible
+    color fg = visible ? textColor : color.new(textColor, 100)
+    color muted = visible ? neutralColor : color.new(neutralColor, 100)
+    table.set_bgcolor(dashboard, bg)
+    table.set_frame_color(dashboard, visible ? color.new(borderColor, 25) : color.new(borderColor, 100))
+    table.set_border_color(dashboard, visible ? color.new(borderColor, 78) : color.new(borderColor, 100))
+    table.cell(dashboard, 0, 0, "Meridian -- Futures Profile", text_color = fg, bgcolor = visible ? color.new(accentColor, 72) : invisible, text_size = f_text_size(dashboardTextSize), text_halign = text.align_left)
+    table.cell(dashboard, 1, 0, "", text_color = fg, bgcolor = visible ? color.new(accentColor, 72) : invisible, text_size = f_text_size(dashboardTextSize))
+    table.cell(dashboard, 0, 1, "Auction", text_color = muted, text_size = f_text_size(dashboardTextSize))
+    table.cell(dashboard, 1, 1, auctionState, text_color = visible ? auctionColor : color.new(auctionColor, 100), text_size = f_text_size(dashboardTextSize), text_halign = text.align_right)
+    table.cell(dashboard, 0, 2, "Value", text_color = muted, text_size = f_text_size(dashboardTextSize))
+    table.cell(dashboard, 1, 2, valueState, text_color = fg, text_size = f_text_size(dashboardTextSize), text_halign = text.align_right)
+    table.cell(dashboard, 0, 3, "Profile", text_color = muted, text_size = f_text_size(dashboardTextSize))
+    table.cell(dashboard, 1, 3, profileState, text_color = fg, text_size = f_text_size(dashboardTextSize), text_halign = text.align_right)
+    table.cell(dashboard, 0, 4, "IB", text_color = muted, text_size = f_text_size(dashboardTextSize))
+    table.cell(dashboard, 1, 4, ibDetail, text_color = visible ? (ibQuality == "EXTREME" ? poorColor : ibQuality == "NARROW" ? developingColor : fg) : color.new(textColor, 100), text_size = f_text_size(dashboardTextSize), text_halign = text.align_right)
+    table.cell(dashboard, 0, 5, "Location", text_color = muted, text_size = f_text_size(dashboardTextSize))
+    table.cell(dashboard, 1, 5, locationState, text_color = fg, text_size = f_text_size(dashboardTextSize), text_halign = text.align_right)
+    table.cell(dashboard, 0, 6, "Data", text_color = muted, text_size = f_text_size(dashboardTextSize))
+    table.cell(dashboard, 1, 6, warningState, text_color = visible ? (chartWarning or currentOverflow or previousOverflow ? poorColor : dataStale ? poorColor : textColor) : color.new(textColor, 100), text_size = f_text_size(dashboardTextSize), text_halign = text.align_right)
 
 bool previousPocEvent = barstate.isconfirmed and alertPreviousLevels and previousPocTouched and not previousPocTouched[1]
 bool previousVahEvent = barstate.isconfirmed and alertPreviousLevels and previousVahTouched and not previousVahTouched[1]
@@ -1136,7 +1140,7 @@ string dynamicEvent = previousPocEvent ? "previous_poc_test" :
 if enableDynamicAlerts and str.length(dynamicEvent) > 0
     string jsonMessage = "{" +
          "\"source\":\"meridian_futures_profile\"," +
-         "\"version\":\"0.1.1\"," +
+         "\"version\":\"0.2.0\"," +
          "\"event\":\"" + dynamicEvent + "\"," +
          "\"symbol\":\"" + syminfo.tickerid + "\"," +
          "\"timeframe\":\"" + timeframe.period + "\"," +
