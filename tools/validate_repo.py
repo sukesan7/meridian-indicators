@@ -156,9 +156,9 @@ def check_markdown_links() -> None:
 
 def normalize_setup(text: str) -> str:
     replacements = {
-        '"Meridian — Futures Setups Research"': '"Meridian — Futures Setups"',
+        '"Meridian - Futures Setups Research"': '"Meridian - Futures Setups"',
         'shorttitle = "Meridian Setups Research"': 'shorttitle = "Meridian Futures Setups"',
-        "// Meridian — Futures Setups Research · v0.3.6-beta": "// Meridian — Futures Setups · v0.3.6-beta",
+        "// Meridian — Futures Setups Research · v0.4.0-beta": "// Meridian — Futures Setups · v0.4.0-beta",
         "const bool RESEARCH_BUILD = true": "const bool RESEARCH_BUILD = false",
         'bool showAllResearchZones = input.bool(true, "Show active research zones"': 'bool showAllResearchZones = input.bool(false, "Show active research zones"',
     }
